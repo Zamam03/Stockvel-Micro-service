@@ -15,12 +15,16 @@ const services = {
     auth: process.env.AUTH_SERVICE_URL || 'http://localhost:4001',
     payment: process.env.PAYMENT_SERVICE_URL || 'http://localhost:4002',
     stockvel: process.env.STOCKVEL_SERVICE_URL || 'http://localhost:4003',
+    meetings: process.env.MEETING_SERVICE_URL || 'http://localhost:4004',
+    analytics: process.env.ANALYTICS_SERVICE_URL || 'http://localhost:4005',
 };
 
 // Routing to microservices
 app.use('/api/auth', createProxyMiddleware({ target: services.auth, changeOrigin: true }));
 app.use('/api/payment', createProxyMiddleware({ target: services.payment, changeOrigin: true }));
 app.use('/api/stockvel', createProxyMiddleware({ target: services.stockvel, changeOrigin: true }));
+app.use('/api/meetings', createProxyMiddleware({ target: services.meetings, changeOrigin: true }));
+app.use('/api/analytics', createProxyMiddleware({ target: services.analytics, changeOrigin: true }));
 
 app.get('/', (req, res) => {
     res.json({ message: 'Welcome to the Stockvel Microservices API Gateway' });

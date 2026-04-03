@@ -14,11 +14,15 @@ services:
       - auth
       - payments
       - stockvel
+      - meetings
+      - analytics
     environment:
       - PORT=5000
       - AUTH_SERVICE_URL=http://auth:4001
       - PAYMENT_SERVICE_URL=http://payments:4002
       - STOCKVEL_SERVICE_URL=http://stockvel:4003
+      - MEETING_SERVICE_URL=http://meetings:4004
+      - ANALYTICS_SERVICE_URL=http://analytics:4005
 
   auth:
     build: ./services/auth-service
@@ -35,6 +39,7 @@ services:
       - "4002:4002"
     environment:
       - PORT=4002
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_test_dummy}
     volumes:
       - ./shared:/usr/src/app/shared
 
@@ -44,5 +49,23 @@ services:
       - "4003:4003"
     environment:
       - PORT=4003
+    volumes:
+      - ./shared:/usr/src/app/shared
+
+  meetings:
+    build: ./services/meeting-service
+    ports:
+      - "4004:4004"
+    environment:
+      - PORT=4004
+    volumes:
+      - ./shared:/usr/src/app/shared
+
+  analytics:
+    build: ./services/analytics-service
+    ports:
+      - "4005:4005"
+    environment:
+      - PORT=4005
     volumes:
       - ./shared:/usr/src/app/shared

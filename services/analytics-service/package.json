@@ -1,14 +1,14 @@
 {
-  "name": "stockvel-service",
+  "name": "analytics-service",
   "version": "1.0.0",
-  "description": "Group Management and Stokvel Operations Service",
+  "description": "Analytics, Reporting and Data Export Service",
   "main": "index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["stokvel", "groups", "members", "microservice"],
+  "keywords": ["analytics", "reports", "csv", "pdf", "microservice"],
   "author": "",
   "license": "MIT",
   "dependencies": {
@@ -16,7 +16,8 @@
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "firebase-admin": "^13.1.0",
-    "node-fetch": "^3.3.2"
+    "pdfkit": "^0.14.0",
+    "json2csv": "^6.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

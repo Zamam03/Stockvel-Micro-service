@@ -1,19 +1,25 @@
 {
   "name": "payment-service",
   "version": "1.0.0",
-  "description": "",
+  "description": "Payment Processing and Contribution Management Service",
   "main": "index.js",
   "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": ["payment", "stripe", "contributions", "microservice"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
-    "stripe": "^21.0.1",
+    "firebase-admin": "^13.1.0",
+    "stripe": "^14.0.0",
     "yoco": "^1.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }
