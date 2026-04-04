@@ -27,14 +27,14 @@ const PORT = process.env.PORT || 4001;
 // Get API key directly from process.env
 const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY;
 
-console.log('Ì¥ß Environment Check:');
+console.log(' Environment Check:');
 console.log('   PORT:', PORT);
 console.log('   API Key exists:', !!FIREBASE_API_KEY);
 console.log('   API Key length:', FIREBASE_API_KEY ? FIREBASE_API_KEY.length : 0);
 console.log('   Project ID:', process.env.VITE_FIREBASE_PROJECT_ID);
 
 if (!FIREBASE_API_KEY) {
-    console.error('‚ùå CRITICAL: FIREBASE_API_KEY is missing!');
+    console.error(' CRITICAL: FIREBASE_API_KEY is missing!');
     process.exit(1);
 }
 
@@ -112,7 +112,7 @@ app.post('/login', async (req, res) => {
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
-        console.log('Ì≥ù Login attempt for:', email);
+        console.log(' Login attempt for:', email);
         
         // Use the API key from process.env
         const apiKey = process.env.VITE_FIREBASE_API_KEY;
@@ -392,10 +392,10 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`\nÌ¥í Auth Service running on port ${PORT}`);
+    console.log(`\n Auth Service running on port ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   Health check: http://localhost:${PORT}/health`);
-    console.log(`   API Key: ${FIREBASE_API_KEY ? '‚úÖ Configured' : '‚ùå Missing'}\n`);
+    console.log(`   API Key: ${FIREBASE_API_KEY ? ' Configured' : ' Missing'}\n`);
 });
 
 module.exports = app;
