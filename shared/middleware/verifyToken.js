@@ -11,10 +11,36 @@ const verifyToken = async (req, res, next) => {
 
     try {
         const decodedToken = await admin.auth().verifyIdToken(token);
-        req.user = decodedToken;
+        
+        // Attach user info to request
+        req.user = {
+            uid: decodedToken.uid,
+            email: decodedToken.email,
+            name: decodedToken.name,
+            picture: decodedToken.picture,
+            emailVerified: decodedToken.email_verified,
+            phoneNumber: decodedToken.phone_number,
+            firebase: decodedToken
+        };
+        
         next();
     } catch (error) {
-        console.error('Error verifying token:', error);
+        console.error('Error verifying token:', error.message);
+        
+        // Specific error messages based on error type
+        if (error.code === 'auth/id-token-expired') {
+            return res.status(401).json({ error: 'Unauthorized: Token expired' });
+        }
+        
+        if (error.code === 'auth/argument-error') {
+            return res.status(401).json({ error: 'Unauthorized: Invalid token format' });
+        }
+        
+        if (error.code === 'auth/user-not-found') {
+            return res.status(403).json({ error: 'Unauthorized: User not found' });
+        }
+        
+        // Generic error for other cases
         return res.status(403).json({ error: 'Unauthorized: Invalid token' });
     }
 };
