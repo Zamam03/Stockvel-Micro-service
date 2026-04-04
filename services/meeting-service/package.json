@@ -2,18 +2,23 @@
   "name": "meeting-service",
   "version": "1.0.0",
   "description": "Meeting Management and Notifications Service",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["meetings", "notifications", "microservice"],
+  "keywords": [
+    "meetings",
+    "notifications",
+    "microservice"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "axios": "^1.14.0",
     "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
+    "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "firebase-admin": "^13.1.0"
   },

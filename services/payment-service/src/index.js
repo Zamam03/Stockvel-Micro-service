@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -7,14 +8,49 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 4002;
-const admin = require('../../shared/firebase/firebaseAdmin');
-const verifyToken = require('../../shared/middleware/verifyToken');
 
-// Initialize Stripe (can be replaced with Yoco)
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy');
+// Fix paths - from payment-service/src to shared folder (3 levels up)
+const admin = require('../../../shared/firebase/firebaseAdmin');
+const verifyToken = require('../../../shared/middleware/verifyToken');
+
+// Mock payment processing (for school project)
+const mockProcessPayment = async (amount, currency, paymentDetails) => {
+    // Simulate payment processing delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Mock success rate (90% success, 10% failure for testing)
+    const shouldSucceed = Math.random() > 0.1;
+    
+    if (shouldSucceed) {
+        return {
+            success: true,
+            transactionId: `mock_txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            amount: amount,
+            currency: currency,
+            paymentMethod: paymentDetails.paymentMethod,
+            timestamp: new Date().toISOString()
+        };
+    } else {
+        throw new Error('Mock payment failed: Insufficient funds');
+    }
+};
+
+// Mock bank transfer for payouts
+const mockProcessPayout = async (amount, currency, bankDetails) => {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    return {
+        success: true,
+        transferId: `mock_transfer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        amount: amount,
+        currency: currency,
+        bankDetails: bankDetails,
+        timestamp: new Date().toISOString()
+    };
+};
 
 app.get('/health', (req, res) => {
-    res.json({ service: 'payment-service', status: 'OK' });
+    res.json({ service: 'payment-service', status: 'OK', timestamp: new Date().toISOString() });
 });
 
 // ========== CONTRIBUTION ENDPOINTS ==========
@@ -25,11 +61,11 @@ app.get('/health', (req, res) => {
  */
 app.post('/contribute', verifyToken, async (req, res) => {
     try {
-        const { groupId, amount, paymentMethodId } = req.body;
+        const { groupId, amount, paymentMethod, paymentDetails } = req.body;
 
-        if (!groupId || !amount || !paymentMethodId) {
+        if (!groupId || !amount || !paymentMethod) {
             return res.status(400).json({
-                error: 'groupId, amount, and paymentMethodId are required'
+                error: 'groupId, amount, and paymentMethod are required'
             });
         }
 
@@ -41,60 +77,59 @@ app.post('/contribute', verifyToken, async (req, res) => {
         }
 
         const groupData = groupDoc.data();
+        const currency = groupData.currency || 'ZAR';
 
         // Verify user is a member
-        if (!groupData.members.includes(req.user.uid)) {
+        const members = groupData.members || [];
+        if (!members.includes(req.user.uid)) {
             return res.status(403).json({ error: 'You are not a member of this group' });
         }
 
-        // Process payment via Stripe
+        // Process mock payment
         try {
-            const paymentIntent = await stripe.paymentIntents.create({
-                amount: Math.round(amount * 100), // Convert to cents
-                currency: groupData.currency.toLowerCase() || 'zar',
-                payment_method: paymentMethodId,
-                confirm: true,
-                metadata: {
-                    groupId,
-                    userId: req.user.uid,
-                    userEmail: req.user.email
-                }
-            });
+            const paymentResult = await mockProcessPayment(
+                parseFloat(amount),
+                currency,
+                { paymentMethod, ...paymentDetails }
+            );
 
-            if (paymentIntent.status !== 'succeeded') {
+            if (!paymentResult.success) {
                 return res.status(400).json({
                     error: 'Payment failed',
-                    paymentStatus: paymentIntent.status
+                    details: paymentResult.error
                 });
             }
 
             // Record contribution in Firestore
             const contributionRef = await db.collection('contributions').add({
                 userId: req.user.uid,
+                userEmail: req.user.email,
                 groupId,
                 amount: parseFloat(amount),
-                currency: groupData.currency,
-                paymentIntentId: paymentIntent.id,
-                status: 'completed', // pending, completed, failed
+                currency: currency,
+                transactionId: paymentResult.transactionId,
+                paymentMethod: paymentMethod,
+                status: 'completed',
                 timestamp: admin.firestore.FieldValue.serverTimestamp(),
                 month: new Date().toISOString().slice(0, 7) // YYYY-MM
             });
 
             // Update user's contribution record
-            const userContributionRef = db.collection('user-contributions').doc(
-                `${req.user.uid}_${groupId}`
-            );
+            const userContributionId = `${req.user.uid}_${groupId}`;
+            const userContributionRef = db.collection('user-contributions').doc(userContributionId);
 
             const userContrib = await userContributionRef.get();
             if (userContrib.exists) {
                 await userContributionRef.update({
                     totalContributed: admin.firestore.FieldValue.increment(parseFloat(amount)),
                     contributionCount: admin.firestore.FieldValue.increment(1),
-                    lastContributionDate: admin.firestore.FieldValue.serverTimestamp()
+                    lastContributionDate: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 });
             } else {
                 await userContributionRef.set({
                     userId: req.user.uid,
+                    userEmail: req.user.email,
                     groupId,
                     totalContributed: parseFloat(amount),
                     contributionCount: 1,
@@ -107,25 +142,28 @@ app.post('/contribute', verifyToken, async (req, res) => {
                 message: 'Contribution processed successfully',
                 contributionId: contributionRef.id,
                 amount: parseFloat(amount),
-                paymentIntentId: paymentIntent.id
+                transactionId: paymentResult.transactionId,
+                status: 'completed'
             });
-        } catch (stripeError) {
-            console.error('Stripe error:', stripeError);
+        } catch (paymentError) {
+            console.error('Payment error:', paymentError);
             
             // Log failed contribution
             await db.collection('contributions').add({
                 userId: req.user.uid,
+                userEmail: req.user.email,
                 groupId,
                 amount: parseFloat(amount),
-                currency: groupData.currency,
+                currency: currency,
+                paymentMethod: paymentMethod,
                 status: 'failed',
-                error: stripeError.message,
+                error: paymentError.message,
                 timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
 
             res.status(400).json({
                 error: 'Payment processing failed',
-                details: stripeError.message
+                details: paymentError.message
             });
         }
     } catch (error) {
@@ -162,7 +200,8 @@ app.get('/contributions/:groupId', verifyToken, async (req, res) => {
 
         const contributions = contributionsSnapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
+            ...doc.data(),
+            timestamp: doc.data().timestamp?.toDate?.() || doc.data().timestamp
         }));
 
         res.json({ contributions, total: contributions.length });
@@ -186,16 +225,17 @@ app.get('/user-contributions/:userId/:groupId', verifyToken, async (req, res) =>
         }
 
         const db = admin.firestore();
-        const userContribRef = db.collection('user-contributions').doc(
-            `${userId}_${groupId}`
-        );
+        const userContributionId = `${userId}_${groupId}`;
+        const userContribRef = db.collection('user-contributions').doc(userContributionId);
 
         const userContrib = await userContribRef.get();
         if (!userContrib.exists) {
             return res.json({
                 totalContributed: 0,
                 contributionCount: 0,
-                lastContributionDate: null
+                lastContributionDate: null,
+                userId: userId,
+                groupId: groupId
             });
         }
 
@@ -238,10 +278,15 @@ app.get('/contributions/:groupId/by-month', verifyToken, async (req, res) => {
             const data = doc.data();
             const month = data.month || 'unknown';
             if (!byMonth[month]) {
-                byMonth[month] = { total: 0, count: 0 };
+                byMonth[month] = { total: 0, count: 0, transactions: [] };
             }
             byMonth[month].total += data.amount;
             byMonth[month].count++;
+            byMonth[month].transactions.push({
+                amount: data.amount,
+                userEmail: data.userEmail,
+                timestamp: data.timestamp?.toDate?.() || data.timestamp
+            });
         });
 
         res.json({ byMonth });
@@ -268,9 +313,9 @@ app.post('/payout/initiate', verifyToken, async (req, res) => {
 
         const { groupId, memberId, amount, bankDetails } = req.body;
 
-        if (!groupId || !memberId || !amount || !bankDetails) {
+        if (!groupId || !memberId || !amount) {
             return res.status(400).json({
-                error: 'groupId, memberId, amount, and bankDetails are required'
+                error: 'groupId, memberId, and amount are required'
             });
         }
 
@@ -281,14 +326,24 @@ app.post('/payout/initiate', verifyToken, async (req, res) => {
             return res.status(404).json({ error: 'Group not found' });
         }
 
+        // Get member details
+        const userDoc = await db.collection('users').doc(memberId).get();
+        const memberEmail = userDoc.exists ? userDoc.data().email : 'unknown';
+
         // Create payout record
         const payoutRef = await db.collection('payouts').add({
             groupId,
             memberId,
+            memberEmail,
             amount: parseFloat(amount),
-            bankDetails, // { accountName, accountNumber, bankName, branchCode }
+            bankDetails: bankDetails || { 
+                bankName: 'Mock Bank', 
+                accountNumber: '****1234',
+                accountName: memberEmail
+            },
             status: 'pending', // pending, processing, completed, failed
             initiatedBy: req.user.uid,
+            initiatedByEmail: req.user.email,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -296,7 +351,8 @@ app.post('/payout/initiate', verifyToken, async (req, res) => {
         res.status(201).json({
             message: 'Payout initiated successfully',
             payoutId: payoutRef.id,
-            status: 'pending'
+            status: 'pending',
+            amount: parseFloat(amount)
         });
     } catch (error) {
         console.error('Error initiating payout:', error);
@@ -306,7 +362,7 @@ app.post('/payout/initiate', verifyToken, async (req, res) => {
 
 /**
  * POST /payout/:payoutId/process
- * Process a payout (transfer funds)
+ * Process a payout (mock transfer)
  */
 app.post('/payout/:payoutId/process', verifyToken, async (req, res) => {
     try {
@@ -328,47 +384,44 @@ app.post('/payout/:payoutId/process', verifyToken, async (req, res) => {
         const payoutData = payoutDoc.data();
 
         if (payoutData.status !== 'pending') {
-            return res.status(400).json({ error: 'Payout is not in pending status' });
+            return res.status(400).json({ error: `Payout is not in pending status (current: ${payoutData.status})` });
         }
 
         try {
-            // Process transfer via Stripe (or alternative banking API)
-            // This is a mock - in production, use proper banking integration
-            const transfer = await stripe.transfers.create({
-                amount: Math.round(payoutData.amount * 100),
-                currency: 'zar',
-                destination: payoutData.bankDetails.stripeAccountId || 'acct_test',
-                metadata: {
-                    payoutId,
-                    memberId: payoutData.memberId,
-                    groupId: payoutData.groupId
-                }
-            });
+            // Process mock payout transfer
+            const transferResult = await mockProcessPayout(
+                payoutData.amount,
+                'ZAR',
+                payoutData.bankDetails
+            );
 
             // Update payout status
             await db.collection('payouts').doc(payoutId).update({
                 status: 'completed',
-                transferId: transfer.id,
+                transferId: transferResult.transferId,
                 completedAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                transferDetails: transferResult
             });
 
             res.json({
                 message: 'Payout processed successfully',
-                transferId: transfer.id
+                payoutId: payoutId,
+                transferId: transferResult.transferId,
+                status: 'completed'
             });
-        } catch (stripeError) {
-            console.error('Stripe transfer error:', stripeError);
+        } catch (transferError) {
+            console.error('Transfer error:', transferError);
 
             await db.collection('payouts').doc(payoutId).update({
                 status: 'failed',
-                error: stripeError.message,
+                error: transferError.message,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
 
             res.status(400).json({
                 error: 'Payout processing failed',
-                details: stripeError.message
+                details: transferError.message
             });
         }
     } catch (error) {
@@ -405,7 +458,9 @@ app.get('/payouts/:groupId', verifyToken, async (req, res) => {
 
         const payouts = payoutsSnapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate?.() || doc.data().createdAt,
+            completedAt: doc.data().completedAt?.toDate?.() || doc.data().completedAt
         }));
 
         res.json({ payouts, total: payouts.length });
@@ -437,7 +492,9 @@ app.get('/member-payouts/:memberId/:groupId', verifyToken, async (req, res) => {
 
         const payouts = payoutsSnapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate?.() || doc.data().createdAt,
+            completedAt: doc.data().completedAt?.toDate?.() || doc.data().completedAt
         }));
 
         res.json({ payouts, total: payouts.length });
@@ -447,6 +504,77 @@ app.get('/member-payouts/:memberId/:groupId', verifyToken, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`ðŸ’³ Payment Service running on port ${PORT}`);
+/**
+ * GET /summary/:groupId
+ * Get payment summary for a group
+ */
+app.get('/summary/:groupId', verifyToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const db = admin.firestore();
+
+        // Verify access
+        const groupDoc = await db.collection('groups').doc(groupId).get();
+        if (!groupDoc.exists) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        const groupData = groupDoc.data();
+        if (!['Admin', 'Treasurer'].includes(req.user.role) &&
+            groupData.createdBy !== req.user.uid) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
+        // Get all completed contributions
+        const contributionsSnapshot = await db.collection('contributions')
+            .where('groupId', '==', groupId)
+            .where('status', '==', 'completed')
+            .get();
+
+        // Get all payouts
+        const payoutsSnapshot = await db.collection('payouts')
+            .where('groupId', '==', groupId)
+            .where('status', '==', 'completed')
+            .get();
+
+        const totalContributions = contributionsSnapshot.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
+        const totalPayouts = payoutsSnapshot.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
+        const availableBalance = totalContributions - totalPayouts;
+
+        res.json({
+            groupId,
+            groupName: groupData.groupName,
+            summary: {
+                totalContributions: totalContributions,
+                totalPayouts: totalPayouts,
+                availableBalance: availableBalance,
+                contributionCount: contributionsSnapshot.size,
+                payoutCount: payoutsSnapshot.size
+            },
+            currency: groupData.currency || 'ZAR'
+        });
+    } catch (error) {
+        console.error('Error fetching payment summary:', error);
+        res.status(500).json({ error: error.message || 'Failed to fetch payment summary' });
+    }
 });
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({ error: `Cannot ${req.method} ${req.url}` });
+});
+
+app.listen(PORT, () => {
+    console.log(`í²³ Payment Service running on port ${PORT}`);
+    console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`   Health check: http://localhost:${PORT}/health`);
+    console.log(`   Mode: Mock Payments (for school project)`);
+});
+
+module.exports = app;

@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -7,11 +8,13 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 4004;
-const admin = require('../../shared/firebase/firebaseAdmin');
-const verifyToken = require('../../shared/middleware/verifyToken');
+
+// Fix paths - from meeting-service/src to shared folder (3 levels up)
+const admin = require('../../../shared/firebase/firebaseAdmin');
+const verifyToken = require('../../../shared/middleware/verifyToken');
 
 app.get('/health', (req, res) => {
-    res.json({ service: 'meeting-service', status: 'OK' });
+    res.json({ service: 'meeting-service', status: 'OK', timestamp: new Date().toISOString() });
 });
 
 // ========== MEETING MANAGEMENT ENDPOINTS ==========
@@ -28,7 +31,7 @@ app.post('/meetings', verifyToken, async (req, res) => {
             description,
             scheduledDate,
             location,
-            meetingType = 'general' // general, voting, payout
+            meetingType = 'general'
         } = req.body;
 
         if (!groupId || !title || !scheduledDate) {
@@ -58,12 +61,12 @@ app.post('/meetings', verifyToken, async (req, res) => {
             groupId,
             title,
             description: description || '',
-            scheduledDate: new Date(scheduledDate),
+            scheduledDate: admin.firestore.Timestamp.fromDate(new Date(scheduledDate)),
             location: location || 'TBD',
             meetingType,
             createdBy: req.user.uid,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            status: 'scheduled', // scheduled, ongoing, completed, cancelled
+            status: 'scheduled',
             agenda: [],
             minutes: '',
             attendees: []
@@ -80,10 +83,10 @@ app.post('/meetings', verifyToken, async (req, res) => {
 });
 
 /**
- * GET /meetings/:groupId
+ * GET /meetings/group/:groupId
  * Get all meetings for a group
  */
-app.get('/meetings/:groupId', async (req, res) => {
+app.get('/meetings/group/:groupId', async (req, res) => {
     try {
         const { groupId } = req.params;
         const db = admin.firestore();
@@ -95,7 +98,8 @@ app.get('/meetings/:groupId', async (req, res) => {
 
         const meetings = meetingsSnapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
+            ...doc.data(),
+            scheduledDate: doc.data().scheduledDate?.toDate?.() || doc.data().scheduledDate
         }));
 
         res.json({ meetings, total: meetings.length });
@@ -106,10 +110,10 @@ app.get('/meetings/:groupId', async (req, res) => {
 });
 
 /**
- * GET /meetings/:groupId/upcoming
+ * GET /meetings/group/:groupId/upcoming
  * Get upcoming meetings for a group
  */
-app.get('/meetings/:groupId/upcoming', async (req, res) => {
+app.get('/meetings/group/:groupId/upcoming', async (req, res) => {
     try {
         const { groupId } = req.params;
         const db = admin.firestore();
@@ -124,7 +128,8 @@ app.get('/meetings/:groupId/upcoming', async (req, res) => {
 
         const meetings = meetingsSnapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
+            ...doc.data(),
+            scheduledDate: doc.data().scheduledDate?.toDate?.() || doc.data().scheduledDate
         }));
 
         res.json({ meetings, total: meetings.length });
@@ -148,7 +153,14 @@ app.get('/meetings/:meetingId', async (req, res) => {
             return res.status(404).json({ error: 'Meeting not found' });
         }
 
-        res.json({ meeting: { id: meetingId, ...meetingDoc.data() } });
+        const meetingData = meetingDoc.data();
+        res.json({ 
+            meeting: { 
+                id: meetingId, 
+                ...meetingData,
+                scheduledDate: meetingData.scheduledDate?.toDate?.() || meetingData.scheduledDate
+            } 
+        });
     } catch (error) {
         console.error('Error fetching meeting:', error);
         res.status(500).json({ error: error.message || 'Failed to fetch meeting' });
@@ -162,7 +174,7 @@ app.get('/meetings/:meetingId', async (req, res) => {
 app.put('/meetings/:meetingId/agenda', verifyToken, async (req, res) => {
     try {
         const { meetingId } = req.params;
-        const { agenda } = req.body; // Array of agenda items
+        const { agenda } = req.body;
 
         if (!agenda || !Array.isArray(agenda)) {
             return res.status(400).json({ error: 'agenda must be an array' });
@@ -175,7 +187,6 @@ app.put('/meetings/:meetingId/agenda', verifyToken, async (req, res) => {
             return res.status(404).json({ error: 'Meeting not found' });
         }
 
-        // Verify permission
         const meetingData = meetingDoc.data();
         if (meetingData.createdBy !== req.user.uid && req.user.role !== 'Admin') {
             return res.status(403).json({ error: 'Only creator or Admin can update agenda' });
@@ -208,19 +219,17 @@ app.post('/meetings/:meetingId/mark-attended', verifyToken, async (req, res) => 
         }
 
         const meetingData = meetingDoc.data();
-        if (!meetingData.attendees) {
-            meetingData.attendees = [];
-        }
+        const attendees = meetingData.attendees || [];
 
-        // Add user to attendees if not already present
-        if (!meetingData.attendees.includes(req.user.uid)) {
-            meetingData.attendees.push(req.user.uid);
+        if (!attendees.includes(req.user.uid)) {
+            attendees.push(req.user.uid);
             await db.collection('meetings').doc(meetingId).update({
-                attendees: meetingData.attendees
+                attendees: attendees,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
         }
 
-        res.json({ message: 'Attendance marked', attendeeCount: meetingData.attendees.length });
+        res.json({ message: 'Attendance marked', attendeeCount: attendees.length });
     } catch (error) {
         console.error('Error marking attendance:', error);
         res.status(500).json({ error: error.message || 'Failed to mark attendance' });
@@ -247,7 +256,6 @@ app.put('/meetings/:meetingId/minutes', verifyToken, async (req, res) => {
             return res.status(404).json({ error: 'Meeting not found' });
         }
 
-        // Verify permission
         const meetingData = meetingDoc.data();
         if (!['Treasurer', 'Admin'].includes(req.user.role) &&
             meetingData.createdBy !== req.user.uid) {
@@ -323,7 +331,7 @@ app.post('/meetings/:meetingId/notify', verifyToken, async (req, res) => {
 
         const meetingData = meetingDoc.data();
 
-        // Get group members
+        // Get group members (assuming members array exists)
         const groupDoc = await db.collection('groups').doc(meetingData.groupId).get();
         if (!groupDoc.exists) {
             return res.status(404).json({ error: 'Group not found' });
@@ -333,21 +341,23 @@ app.post('/meetings/:meetingId/notify', verifyToken, async (req, res) => {
         const members = groupData.members || [];
 
         // Create notifications for each member
+        const notifications = [];
         for (const memberId of members) {
-            await db.collection('notifications').add({
+            const notificationRef = await db.collection('notifications').add({
                 userId: memberId,
                 type: 'meeting',
                 title: `Meeting: ${meetingData.title}`,
-                message: `A new meeting has been scheduled: ${meetingData.title}`,
+                message: `A new meeting has been scheduled: ${meetingData.title} on ${meetingData.scheduledDate?.toDate?.() || meetingData.scheduledDate}`,
                 meetingId,
                 groupId: meetingData.groupId,
                 read: false,
                 createdAt: admin.firestore.FieldValue.serverTimestamp()
             });
+            notifications.push(notificationRef.id);
         }
 
         res.json({
-            message: 'Notifications sent to all group members',
+            message: 'Notifications sent to group members',
             notificationCount: members.length
         });
     } catch (error) {
@@ -364,7 +374,6 @@ app.get('/notifications/:userId', verifyToken, async (req, res) => {
     try {
         const { userId } = req.params;
 
-        // Users can only view their own notifications
         if (req.user.uid !== userId && req.user.role !== 'Admin') {
             return res.status(403).json({ error: 'Unauthorized' });
         }
@@ -378,7 +387,8 @@ app.get('/notifications/:userId', verifyToken, async (req, res) => {
 
         const notifications = notificationsSnapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate?.() || doc.data().createdAt
         }));
 
         res.json({ notifications, total: notifications.length });
@@ -388,6 +398,52 @@ app.get('/notifications/:userId', verifyToken, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`ðŸ“… Meeting Service running on port ${PORT}`);
+/**
+ * PUT /notifications/:notificationId/read
+ * Mark notification as read
+ */
+app.put('/notifications/:notificationId/read', verifyToken, async (req, res) => {
+    try {
+        const { notificationId } = req.params;
+        const db = admin.firestore();
+
+        const notificationDoc = await db.collection('notifications').doc(notificationId).get();
+        if (!notificationDoc.exists) {
+            return res.status(404).json({ error: 'Notification not found' });
+        }
+
+        const notificationData = notificationDoc.data();
+        if (notificationData.userId !== req.user.uid && req.user.role !== 'Admin') {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
+        await db.collection('notifications').doc(notificationId).update({
+            read: true,
+            readAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({ message: 'Notification marked as read' });
+    } catch (error) {
+        console.error('Error marking notification as read:', error);
+        res.status(500).json({ error: error.message || 'Failed to mark notification as read' });
+    }
 });
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({ error: `Cannot ${req.method} ${req.url}` });
+});
+
+app.listen(PORT, () => {
+    console.log(`í³… Meeting Service running on port ${PORT}`);
+    console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`   Health check: http://localhost:${PORT}/health`);
+});
+
+module.exports = app;

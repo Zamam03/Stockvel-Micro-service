@@ -2,7 +2,7 @@
   "name": "stockvel-service",
   "version": "1.0.0",
   "description": "Group Management and Stokvel Operations Service",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
@@ -13,10 +13,9 @@
   "license": "MIT",
   "dependencies": {
     "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
+    "dotenv": "^16.4.5",
     "express": "^5.2.1",
-    "firebase-admin": "^13.1.0",
-    "node-fetch": "^3.3.2"
+    "firebase-admin": "^13.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
