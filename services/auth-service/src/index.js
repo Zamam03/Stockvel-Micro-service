@@ -1,25 +1,54 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+
+// Load .env manually
+const envPath = path.join(__dirname, '../.env');
+if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    envContent.split('\n').forEach(line => {
+        const [key, ...valueParts] = line.split('=');
+        if (key && !key.startsWith('#')) {
+            const value = valueParts.join('=');
+            if (!process.env[key]) {
+                process.env[key] = value;
+            }
+        }
+    });
+}
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 4001;
-const admin = require('../../shared/firebase/firebaseAdmin');
-const verifyToken = require('../../shared/middleware/verifyToken');
+
+// Get API key directly from process.env
+const FIREBASE_API_KEY = process.env.VITE_FIREBASE_API_KEY;
+
+console.log('Ì¥ß Environment Check:');
+console.log('   PORT:', PORT);
+console.log('   API Key exists:', !!FIREBASE_API_KEY);
+console.log('   API Key length:', FIREBASE_API_KEY ? FIREBASE_API_KEY.length : 0);
+console.log('   Project ID:', process.env.VITE_FIREBASE_PROJECT_ID);
+
+if (!FIREBASE_API_KEY) {
+    console.error('‚ùå CRITICAL: FIREBASE_API_KEY is missing!');
+    process.exit(1);
+}
+
+// Fix the paths - from auth-service/src to shared folder (3 levels up)
+const admin = require('../../../shared/firebase/firebaseAdmin');
+const verifyToken = require('../../../shared/middleware/verifyToken');
 
 app.get('/health', (req, res) => {
-    res.json({ service: 'auth-service', status: 'OK' });
+    res.json({ service: 'auth-service', status: 'OK', timestamp: new Date().toISOString() });
 });
-
-// ========== AUTHENTICATION ENDPOINTS ==========
 
 /**
  * POST /register
- * Register a new user with email, password, and role
- * Roles: Member, Treasurer, Admin
+ * Register a new user
  */
 app.post('/register', async (req, res) => {
     try {
@@ -29,22 +58,18 @@ app.post('/register', async (req, res) => {
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
-        // Validate role
         if (!['Member', 'Treasurer', 'Admin'].includes(role)) {
-            return res.status(400).json({ error: 'Invalid role. Must be Member, Treasurer, or Admin.' });
+            return res.status(400).json({ error: 'Invalid role' });
         }
 
-        // 1. Create user in Firebase Auth
         const userRecord = await admin.auth().createUser({
             email,
             password,
             displayName: displayName || email.split('@')[0],
         });
 
-        // 2. Set Custom User Claims for Role-Based Access Control
         await admin.auth().setCustomUserClaims(userRecord.uid, { role });
 
-        // 3. Save User Profile to Firestore Database
         const db = admin.firestore();
         await db.collection('users').doc(userRecord.uid).set({
             uid: userRecord.uid,
@@ -53,12 +78,12 @@ app.post('/register', async (req, res) => {
             role,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            groupIds: [], // Array to track which Stokvels they belong to
+            groupIds: [],
             isActive: true
         });
 
         res.status(201).json({ 
-            message: 'User registered securely', 
+            message: 'User registered successfully', 
             user: {
                 uid: userRecord.uid,
                 email: userRecord.email,
@@ -77,7 +102,7 @@ app.post('/register', async (req, res) => {
 
 /**
  * POST /login
- * Login user and return ID token
+ * Get Firebase token using REST API
  */
 app.post('/login', async (req, res) => {
     try {
@@ -87,14 +112,49 @@ app.post('/login', async (req, res) => {
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
-        // Firebase doesn't provide a simple backend login. 
-        // Frontend should use Firebase SDK's signInWithEmailAndPassword.
-        // This endpoint is primarily for verification purposes.
-        // In real scenarios, use Firebase REST API or Firebase SDK on client.
+        console.log('Ì≥ù Login attempt for:', email);
         
-        res.status(200).json({ 
-            message: 'Use Firebase SDK on client to login. This endpoint validates on backend.',
-            info: 'Frontend should call Firebase auth().signInWithEmailAndPassword()'
+        // Use the API key from process.env
+        const apiKey = process.env.VITE_FIREBASE_API_KEY;
+        
+        console.log('   API Key from process.env:', apiKey ? `${apiKey.substring(0, 15)}...` : 'NOT FOUND');
+        
+        if (!apiKey) {
+            return res.status(500).json({ error: 'Firebase API key not configured. Check .env file.' });
+        }
+
+        // Call Firebase REST API
+        const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email,
+                password,
+                returnSecureToken: true
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.log('   Login failed:', data.error?.message);
+            return res.status(401).json({ error: data.error?.message || 'Invalid credentials' });
+        }
+
+        // Get user role
+        const userRecord = await admin.auth().getUser(data.localId);
+        const role = userRecord.customClaims?.role || 'Member';
+
+        console.log('   Login successful for:', email, 'Role:', role);
+
+        res.json({
+            message: 'Login successful',
+            idToken: data.idToken,
+            refreshToken: data.refreshToken,
+            expiresIn: data.expiresIn,
+            localId: data.localId,
+            email: data.email,
+            role: role
         });
     } catch (error) {
         console.error('Error during login:', error);
@@ -104,7 +164,6 @@ app.post('/login', async (req, res) => {
 
 /**
  * POST /verify-token
- * Verify if token is valid
  */
 app.post('/verify-token', verifyToken, async (req, res) => {
     try {
@@ -133,11 +192,15 @@ app.post('/verify-token', verifyToken, async (req, res) => {
 
 /**
  * GET /user/:uid
- * Get user profile by UID (requires token)
  */
 app.get('/user/:uid', verifyToken, async (req, res) => {
     try {
         const { uid } = req.params;
+        
+        if (req.user.uid !== uid && req.user.role !== 'Admin') {
+            return res.status(403).json({ error: 'Unauthorized to view this user' });
+        }
+        
         const db = admin.firestore();
         const userDoc = await db.collection('users').doc(uid).get();
 
@@ -154,21 +217,20 @@ app.get('/user/:uid', verifyToken, async (req, res) => {
 
 /**
  * PUT /user/:uid
- * Update user profile (requires token)
  */
 app.put('/user/:uid', verifyToken, async (req, res) => {
     try {
         const { uid } = req.params;
-        const updateData = req.body;
-
-        // Prevent role changes via this endpoint
-        if (updateData.role) {
-            delete updateData.role;
+        
+        if (req.user.uid !== uid && req.user.role !== 'Admin') {
+            return res.status(403).json({ error: 'Unauthorized to update this user' });
         }
+        
+        const updateData = req.body;
+        if (updateData.role) delete updateData.role;
 
         const db = admin.firestore();
         updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
-
         await db.collection('users').doc(uid).update(updateData);
 
         res.json({ message: 'User profile updated successfully' });
@@ -180,11 +242,9 @@ app.put('/user/:uid', verifyToken, async (req, res) => {
 
 /**
  * POST /change-role
- * Admin only: Change user role
  */
 app.post('/change-role', verifyToken, async (req, res) => {
     try {
-        // Check if requester is Admin
         if (req.user.role !== 'Admin') {
             return res.status(403).json({ error: 'Only Admins can change user roles' });
         }
@@ -199,10 +259,8 @@ app.post('/change-role', verifyToken, async (req, res) => {
             return res.status(400).json({ error: 'Invalid role' });
         }
 
-        // Update custom claims
         await admin.auth().setCustomUserClaims(userId, { role: newRole });
 
-        // Update Firestore
         const db = admin.firestore();
         await db.collection('users').doc(userId).update({
             role: newRole,
@@ -218,7 +276,6 @@ app.post('/change-role', verifyToken, async (req, res) => {
 
 /**
  * POST /add-to-group
- * Add user to a group and track in their groupIds
  */
 app.post('/add-to-group', verifyToken, async (req, res) => {
     try {
@@ -236,15 +293,17 @@ app.post('/add-to-group', verifyToken, async (req, res) => {
         }
 
         const userData = userDoc.data();
-        if (!userData.groupIds.includes(groupId)) {
-            userData.groupIds.push(groupId);
+        const groupIds = userData.groupIds || [];
+        
+        if (!groupIds.includes(groupId)) {
+            groupIds.push(groupId);
             await db.collection('users').doc(userId).update({
-                groupIds: userData.groupIds,
+                groupIds: groupIds,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
         }
 
-        res.json({ message: 'User added to group', groupIds: userData.groupIds });
+        res.json({ message: 'User added to group', groupIds: groupIds });
     } catch (error) {
         console.error('Error adding user to group:', error);
         res.status(500).json({ error: error.message || 'Failed to add user to group' });
@@ -253,7 +312,6 @@ app.post('/add-to-group', verifyToken, async (req, res) => {
 
 /**
  * POST /remove-from-group
- * Remove user from a group
  */
 app.post('/remove-from-group', verifyToken, async (req, res) => {
     try {
@@ -271,14 +329,14 @@ app.post('/remove-from-group', verifyToken, async (req, res) => {
         }
 
         const userData = userDoc.data();
-        const updatedGroupIds = userData.groupIds.filter(id => id !== groupId);
+        const groupIds = (userData.groupIds || []).filter(id => id !== groupId);
 
         await db.collection('users').doc(userId).update({
-            groupIds: updatedGroupIds,
+            groupIds: groupIds,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        res.json({ message: 'User removed from group', groupIds: updatedGroupIds });
+        res.json({ message: 'User removed from group', groupIds: groupIds });
     } catch (error) {
         console.error('Error removing user from group:', error);
         res.status(500).json({ error: error.message || 'Failed to remove user from group' });
@@ -287,7 +345,6 @@ app.post('/remove-from-group', verifyToken, async (req, res) => {
 
 /**
  * GET /users
- * Admin only: List all users (with pagination)
  */
 app.get('/users', verifyToken, async (req, res) => {
     try {
@@ -296,7 +353,8 @@ app.get('/users', verifyToken, async (req, res) => {
         }
 
         const limit = parseInt(req.query.limit) || 50;
-        const offset = parseInt(req.query.offset) || 0;
+        const page = parseInt(req.query.page) || 1;
+        const offset = (page - 1) * limit;
 
         const db = admin.firestore();
         const usersSnapshot = await db.collection('users')
@@ -309,13 +367,35 @@ app.get('/users', verifyToken, async (req, res) => {
             ...doc.data()
         }));
 
-        res.json({ users, total: users.length });
+        res.json({ 
+            users, 
+            pagination: {
+                page,
+                limit,
+                total: users.length
+            }
+        });
     } catch (error) {
         console.error('Error listing users:', error);
         res.status(500).json({ error: error.message || 'Failed to list users' });
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`üîí Auth Service running on port ${PORT}`);
+// Error handling
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: 'Internal server error' });
 });
+
+app.use((req, res) => {
+    res.status(404).json({ error: `Cannot ${req.method} ${req.url}` });
+});
+
+app.listen(PORT, () => {
+    console.log(`\nÌ¥í Auth Service running on port ${PORT}`);
+    console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`   Health check: http://localhost:${PORT}/health`);
+    console.log(`   API Key: ${FIREBASE_API_KEY ? '‚úÖ Configured' : '‚ùå Missing'}\n`);
+});
+
+module.exports = app;

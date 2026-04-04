@@ -12,6 +12,10 @@ const verifyToken = async (req, res, next) => {
     try {
         const decodedToken = await admin.auth().verifyIdToken(token);
         
+        // IMPORTANT: Get the role from custom claims
+        // The role is stored in decodedToken.role (from custom claims)
+        const role = decodedToken.role || 'Member';
+        
         // Attach user info to request
         req.user = {
             uid: decodedToken.uid,
@@ -20,12 +24,15 @@ const verifyToken = async (req, res, next) => {
             picture: decodedToken.picture,
             emailVerified: decodedToken.email_verified,
             phoneNumber: decodedToken.phone_number,
+            role: role,  // Make sure role is set from custom claims
             firebase: decodedToken
         };
         
+        console.log('✅ Token verified for user:', decodedToken.email, 'Role:', role);
+        
         next();
     } catch (error) {
-        console.error('Error verifying token:', error.message);
+        console.error('❌ Error verifying token:', error.message);
         
         // Specific error messages based on error type
         if (error.code === 'auth/id-token-expired') {
@@ -40,7 +47,6 @@ const verifyToken = async (req, res, next) => {
             return res.status(403).json({ error: 'Unauthorized: User not found' });
         }
         
-        // Generic error for other cases
         return res.status(403).json({ error: 'Unauthorized: Invalid token' });
     }
 };
