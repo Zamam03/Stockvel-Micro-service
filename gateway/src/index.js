@@ -1,143 +1,124 @@
 const express = require('express');
 const cors = require('cors');
-const { createProxyMiddleware } = require('http-proxy-middleware');
 const morgan = require('morgan');
-const path = require('path');
+const http = require('http');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Health check endpoint for each service
-const services = {
-    auth: process.env.AUTH_SERVICE_URL || 'http://localhost:4001',
-    payment: process.env.PAYMENT_SERVICE_URL || 'http://localhost:4002',
-    stockvel: process.env.STOCKVEL_SERVICE_URL || 'http://localhost:4003',
-    meetings: process.env.MEETING_SERVICE_URL || 'http://localhost:4004',
-    analytics: process.env.ANALYTICS_SERVICE_URL || 'http://localhost:4005',
+// Service URLs
+const SERVICES = {
+    auth: 'http://localhost:4001',
+    payment: 'http://localhost:4002',
+    stockvel: 'http://localhost:4003',
+    meetings: 'http://localhost:4004',
+    analytics: 'http://localhost:4005'
 };
 
-console.log('í´§ Service URLs:');
-console.log(`   Auth Service: ${services.auth}`);
-console.log(`   Payment Service: ${services.payment}`);
-console.log(`   Stockvel Service: ${services.stockvel}`);
-console.log(`   Meeting Service: ${services.meetings}`);
-console.log(`   Analytics Service: ${services.analytics}`);
+console.log('\nðŸš€ Gateway Starting...');
+console.log('Services:');
+Object.entries(SERVICES).forEach(([name, url]) => {
+    console.log(`   ${name}: ${url}`);
+});
 
-// Proxy middleware configuration
-const proxyOptions = {
-    changeOrigin: true,
-    onError: (err, req, res) => {
-        console.error('Proxy Error:', err.message);
-        res.status(500).json({ 
-            error: 'Service unavailable', 
-            details: err.message,
-            service: req.baseUrl
-        });
-    },
-    onProxyReq: (proxyReq, req, res) => {
-        // Forward the authorization header
-        if (req.headers.authorization) {
-            proxyReq.setHeader('Authorization', req.headers.authorization);
+// Proxy middleware
+const createProxy = (serviceUrl) => {
+    return (req, res) => {
+        // Get the original path and remove the /api/service prefix
+        let path = req.originalUrl;
+        const serviceName = Object.keys(SERVICES).find(key => SERVICES[key] === serviceUrl);
+        
+        // Remove /api/servicename from path
+        const prefix = `/api/${serviceName}`;
+        if (path.startsWith(prefix)) {
+            path = path.slice(prefix.length);
         }
-    }
+        if (!path || path === '') path = '/';
+        
+        const targetUrl = `${serviceUrl}${path}`;
+        console.log(`[${serviceName.toUpperCase()}] ${req.method} ${req.originalUrl} -> ${targetUrl}`);
+        
+        const options = {
+            method: req.method,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(req.headers.authorization && { 'Authorization': req.headers.authorization })
+            }
+        };
+        
+        let body = null;
+        if (req.method === 'POST' || req.method === 'PUT') {
+            body = JSON.stringify(req.body);
+            options.headers['Content-Length'] = Buffer.byteLength(body);
+        }
+        
+        const proxyReq = http.request(targetUrl, options, (proxyRes) => {
+            let data = '';
+            proxyRes.on('data', chunk => data += chunk);
+            proxyRes.on('end', () => {
+                res.status(proxyRes.statusCode);
+                try {
+                    res.json(JSON.parse(data));
+                } catch {
+                    res.send(data);
+                }
+            });
+        });
+        
+        proxyReq.on('error', (err) => {
+            console.error(`[ERROR] ${serviceName}:`, err.message);
+            if (!res.headersSent) {
+                res.status(503).json({ error: `${serviceName} service unavailable`, message: err.message });
+            }
+        });
+        
+        if (body) proxyReq.write(body);
+        proxyReq.end();
+    };
 };
 
-// Route to each microservice
-app.use('/api/auth', createProxyMiddleware({ ...proxyOptions, target: services.auth }));
-app.use('/api/payment', createProxyMiddleware({ ...proxyOptions, target: services.payment }));
-app.use('/api/stockvel', createProxyMiddleware({ ...proxyOptions, target: services.stockvel }));
-app.use('/api/meetings', createProxyMiddleware({ ...proxyOptions, target: services.meetings }));
-app.use('/api/analytics', createProxyMiddleware({ ...proxyOptions, target: services.analytics }));
+// Mount proxies
+app.use('/api/auth', createProxy(SERVICES.auth));
+app.use('/api/payment', createProxy(SERVICES.payment));
+app.use('/api/stockvel', createProxy(SERVICES.stockvel));
+app.use('/api/meetings', createProxy(SERVICES.meetings));
+app.use('/api/analytics', createProxy(SERVICES.analytics));
 
-// Root endpoint
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ gateway: 'UP', port: PORT, timestamp: new Date().toISOString() });
+});
+
 app.get('/', (req, res) => {
     res.json({ 
-        message: 'Welcome to the Stockvel Microservices API Gateway',
+        message: 'Stockvel API Gateway', 
         version: '1.0.0',
         endpoints: {
             auth: '/api/auth',
-            payment: '/api/payment',
             stockvel: '/api/stockvel',
+            payment: '/api/payment',
             meetings: '/api/meetings',
             analytics: '/api/analytics'
         }
     });
 });
 
-// Gateway health check
-app.get('/health', async (req, res) => {
-    const healthStatus = {};
-    
-    // Check each service health
-    const checkService = async (name, url) => {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000);
-            const response = await fetch(`${url}/health`, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            healthStatus[name] = response.ok ? 'UP' : 'DOWN';
-        } catch (error) {
-            healthStatus[name] = 'DOWN';
-        }
-    };
-    
-    await Promise.all([
-        checkService('auth', services.auth),
-        checkService('payment', services.payment),
-        checkService('stockvel', services.stockvel),
-        checkService('meetings', services.meetings),
-        checkService('analytics', services.analytics)
-    ]);
-    
-    const allUp = Object.values(healthStatus).every(status => status === 'UP');
-    
-    res.json({
-        gateway: 'UP',
-        timestamp: new Date().toISOString(),
-        services: healthStatus,
-        overall: allUp ? 'ALL_SERVICES_UP' : 'SOME_SERVICES_DOWN'
-    });
-});
-
-// 404 handler for undefined routes
+// 404 handler
 app.use((req, res) => {
-    res.status(404).json({ 
-        error: 'Route not found',
-        path: req.originalUrl,
-        method: req.method
-    });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error('Gateway Error:', err);
-    res.status(500).json({ 
-        error: 'Gateway internal error',
-        message: err.message 
-    });
+    if (!res.headersSent) {
+        res.status(404).json({ error: 'Route not found', path: req.originalUrl });
+    }
 });
 
 app.listen(PORT, () => {
-    console.log(`\níº€ API Gateway is running on port ${PORT}`);
-    console.log(`   Health check: http://localhost:${PORT}/health`);
-    console.log(`   Gateway URL: http://localhost:${PORT}\n`);
-    console.log('í³‹ Available Routes:');
-    console.log(`   POST   /api/auth/register`);
-    console.log(`   POST   /api/auth/login`);
-    console.log(`   GET    /api/auth/verify-token`);
-    console.log(`   POST   /api/payment/contribute`);
-    console.log(`   GET    /api/payment/summary/:groupId`);
-    console.log(`   POST   /api/stockvel/groups`);
-    console.log(`   GET    /api/stockvel/groups`);
-    console.log(`   POST   /api/meetings/meetings`);
-    console.log(`   GET    /api/meetings/meetings/:meetingId`);
-    console.log(`   GET    /api/analytics/health`);
+    console.log(`\nâœ… Gateway running on http://localhost:${PORT}`);
+    console.log(`   Health: http://localhost:${PORT}/health\n`);
 });
 
 module.exports = app;
