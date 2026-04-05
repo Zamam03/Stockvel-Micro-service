@@ -100,7 +100,7 @@ app.post('/contribute', verifyToken, async (req, res) => {
                 });
             }
 
-            // Record contribution in Firestore
+            // Record contribution in Firestore (pending treasurer confirmation)
             const contributionRef = await db.collection('contributions').add({
                 userId: req.user.uid,
                 userEmail: req.user.email,
@@ -109,9 +109,11 @@ app.post('/contribute', verifyToken, async (req, res) => {
                 currency: currency,
                 transactionId: paymentResult.transactionId,
                 paymentMethod: paymentMethod,
-                status: 'completed',
+                status: 'pending',
+                confirmedAt: null,
+                confirmedBy: null,
                 timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                month: new Date().toISOString().slice(0, 7) // YYYY-MM
+                month: new Date().toISOString().slice(0, 7)
             });
 
             // Update user's contribution record
@@ -243,6 +245,144 @@ app.get('/user-contributions/:userId/:groupId', verifyToken, async (req, res) =>
     } catch (error) {
         console.error('Error fetching user contributions:', error);
         res.status(500).json({ error: error.message || 'Failed to fetch contributions' });
+    }
+});
+
+/**
+ * POST /contributions/:contributionId/confirm
+ * Treasurer confirms/accepts a contribution
+ */
+app.post('/contributions/:contributionId/confirm', verifyToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'Treasurer') {
+            return res.status(403).json({ error: 'Only Treasurers can confirm contributions' });
+        }
+
+        const { contributionId } = req.params;
+        const db = admin.firestore();
+
+        const contributionDoc = await db.collection('contributions').doc(contributionId).get();
+        if (!contributionDoc.exists) {
+            return res.status(404).json({ error: 'Contribution not found' });
+        }
+
+        const contribution = contributionDoc.data();
+
+        if (contribution.status !== 'pending') {
+            return res.status(400).json({ error: `Contribution is not pending (current: ${contribution.status})` });
+        }
+
+        // Confirm the contribution
+        await db.collection('contributions').doc(contributionId).update({
+            status: 'confirmed',
+            confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+            confirmedBy: req.user.uid
+        });
+
+        // Update user-contributions to include this in their total
+        const userContributionId = `${contribution.userId}_${contribution.groupId}`;
+        const userContribRef = db.collection('user-contributions').doc(userContributionId);
+
+        const userContrib = await userContribRef.get();
+        if (userContrib.exists) {
+            await userContribRef.update({
+                totalContributed: admin.firestore.FieldValue.increment(contribution.amount),
+                confirmedAmount: admin.firestore.FieldValue.increment(contribution.amount)
+            });
+        }
+
+        res.json({
+            message: 'Contribution confirmed',
+            contributionId: contributionId,
+            amount: contribution.amount
+        });
+    } catch (error) {
+        console.error('Error confirming contribution:', error);
+        res.status(500).json({ error: error.message || 'Failed to confirm contribution' });
+    }
+});
+
+/**
+ * POST /contributions/:contributionId/flag
+ * Treasurer flags a contribution as missed
+ */
+app.post('/contributions/:contributionId/flag', verifyToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'Treasurer') {
+            return res.status(403).json({ error: 'Only Treasurers can flag contributions' });
+        }
+
+        const { contributionId } = req.params;
+        const { reason } = req.body;
+        const db = admin.firestore();
+
+        const contributionDoc = await db.collection('contributions').doc(contributionId).get();
+        if (!contributionDoc.exists) {
+            return res.status(404).json({ error: 'Contribution not found' });
+        }
+
+        const contribution = contributionDoc.data();
+
+        // Flag the contribution
+        await db.collection('contributions').doc(contributionId).update({
+            status: 'flagged',
+            flaggedAt: admin.firestore.FieldValue.serverTimestamp(),
+            flaggedBy: req.user.uid,
+            flagReason: reason || 'Missed contribution'
+        });
+
+        res.json({
+            message: 'Contribution flagged',
+            contributionId: contributionId,
+            status: 'flagged'
+        });
+    } catch (error) {
+        console.error('Error flagging contribution:', error);
+        res.status(500).json({ error: error.message || 'Failed to flag contribution' });
+    }
+});
+
+/**
+ * POST /contributions/:contributionId/reject
+ * Treasurer rejects a pending contribution
+ */
+app.post('/contributions/:contributionId/reject', verifyToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'Treasurer') {
+            return res.status(403).json({ error: 'Only Treasurers can reject contributions' });
+        }
+
+        const { contributionId } = req.params;
+        const { reason } = req.body;
+        const db = admin.firestore();
+
+        const contributionDoc = await db.collection('contributions').doc(contributionId).get();
+        if (!contributionDoc.exists) {
+            return res.status(404).json({ error: 'Contribution not found' });
+        }
+
+        const contribution = contributionDoc.data();
+
+        if (contribution.status !== 'pending') {
+            return res.status(400).json({ error: `Can only reject pending contributions (current: ${contribution.status})` });
+        }
+
+        // Reject the contribution
+        await db.collection('contributions').doc(contributionId).update({
+            status: 'rejected',
+            rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+            rejectedBy: req.user.uid,
+            rejectionReason: reason || 'Rejected by treasurer'
+        });
+
+        res.json({
+            message: 'Contribution rejected',
+            contributionId: contributionId,
+            status: 'rejected'
+        });
+    } catch (error) {
+        console.error('Error rejecting contribution:', error);
+        res.status(500).json({ error: error.message || 'Failed to reject contribution' });
     }
 });
 
@@ -559,6 +699,122 @@ app.get('/summary/:groupId', verifyToken, async (req, res) => {
     }
 });
 
+// ========== TREASURER PAYMENT CONFIRMATION ENDPOINTS ==========
+
+/**
+ * POST /contributions/:contributionId/confirm
+ * Treasurer confirms a contribution
+ */
+app.post('/contributions/:contributionId/confirm', verifyToken, async (req, res) => {
+    try {
+        const { contributionId } = req.params;
+        const db = admin.firestore();
+
+        // Only Treasurers and Admins can confirm
+        if (!['Admin', 'Treasurer'].includes(req.user.role)) {
+            return res.status(403).json({ error: 'Only Treasurers and Admins can confirm contributions' });
+        }
+
+        const contributionDoc = await db.collection('contributions').doc(contributionId).get();
+        if (!contributionDoc.exists) {
+            return res.status(404).json({ error: 'Contribution not found' });
+        }
+
+        const contribution = contributionDoc.data();
+
+        if (contribution.status === 'confirmed') {
+            return res.status(400).json({ error: 'Contribution already confirmed' });
+        }
+
+        await db.collection('contributions').doc(contributionId).update({
+            status: 'confirmed',
+            confirmedBy: req.user.uid,
+            confirmedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({
+            message: 'Contribution confirmed',
+            contributionId: contributionId,
+            status: 'confirmed'
+        });
+    } catch (error) {
+        console.error('Error confirming contribution:', error);
+        res.status(500).json({ error: error.message || 'Failed to confirm contribution' });
+    }
+});
+
+/**
+ * POST /contributions/:contributionId/flag
+ * Treasurer flags a missed contribution
+ */
+app.post('/contributions/:contributionId/flag', verifyToken, async (req, res) => {
+    try {
+        const { contributionId } = req.params;
+        const { reason } = req.body;
+        const db = admin.firestore();
+
+        // Only Treasurers and Admins can flag
+        if (!['Admin', 'Treasurer'].includes(req.user.role)) {
+            return res.status(403).json({ error: 'Only Treasurers and Admins can flag contributions' });
+        }
+
+        const contributionDoc = await db.collection('contributions').doc(contributionId).get();
+        if (!contributionDoc.exists) {
+            return res.status(404).json({ error: 'Contribution not found' });
+        }
+
+        await db.collection('contributions').doc(contributionId).update({
+            status: 'flagged',
+            flaggedReason: reason || 'Missed contribution',
+            flaggedBy: req.user.uid,
+            flaggedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({
+            message: 'Contribution flagged',
+            contributionId: contributionId,
+            status: 'flagged'
+        });
+    } catch (error) {
+        console.error('Error flagging contribution:', error);
+        res.status(500).json({ error: error.message || 'Failed to flag contribution' });
+    }
+});
+
+/**
+ * GET /missed-contributions/:groupId
+ * Get all flagged/missed contributions in a group
+ */
+app.get('/missed-contributions/:groupId', verifyToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const db = admin.firestore();
+
+        // Only Treasurers and Admins can view
+        if (!['Admin', 'Treasurer'].includes(req.user.role)) {
+            return res.status(403).json({ error: 'Only Treasurers and Admins can view missed contributions' });
+        }
+
+        const missedSnapshot = await db.collection('contributions')
+            .where('groupId', '==', groupId)
+            .where('status', '==', 'flagged')
+            .orderBy('timestamp', 'desc')
+            .get();
+
+        const missedContributions = missedSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            timestamp: doc.data().timestamp?.toDate?.() || doc.data().timestamp,
+            flaggedAt: doc.data().flaggedAt?.toDate?.() || doc.data().flaggedAt
+        }));
+
+        res.json({ missedContributions, total: missedContributions.length });
+    } catch (error) {
+        console.error('Error fetching missed contributions:', error);
+        res.status(500).json({ error: error.message || 'Failed to fetch missed contributions' });
+    }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
@@ -571,7 +827,7 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`í²³ Payment Service running on port ${PORT}`);
+    console.log(`ï¿½ï¿½ï¿½ Payment Service running on port ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   Health check: http://localhost:${PORT}/health`);
     console.log(`   Mode: Mock Payments (for school project)`);

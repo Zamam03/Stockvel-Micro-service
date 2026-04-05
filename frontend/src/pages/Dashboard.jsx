@@ -315,7 +315,7 @@ export default function Dashboard() {
                     <span className="tab-label">Browse Groups</span>
                     <span className="tab-count">{availableGroups.length}</span>
                 </button>
-                {['admin', 'treasurer'].includes(userRole?.toLowerCase()) && (
+                {userRole?.toLowerCase() === 'admin' && (
                     <button
                         className={`tab ${activeTab === 'create-group' ? 'active' : ''}`}
                         onClick={() => setActiveTab('create-group')}

@@ -154,6 +154,31 @@ export const groupAPI = {
     apiRequest(`/stockvel/groups/${groupId}/join-requests/${userId}/reject`, {
       method: 'POST',
     }),
+
+  // Member Invitation
+  inviteMember: (groupId, memberEmail) =>
+    apiRequest(`/stockvel/groups/${groupId}/invite`, {
+      method: 'POST',
+      body: { memberEmail },
+    }),
+
+  removeMember: (groupId, memberId) =>
+    apiRequest(`/stockvel/groups/${groupId}/members/${memberId}`, {
+      method: 'DELETE',
+    }),
+
+  getUserInvitations: (userId) =>
+    apiRequest(`/stockvel/user/${userId}/invitations`),
+
+  acceptInvitation: (invitationId) =>
+    apiRequest(`/stockvel/invitations/${invitationId}/accept`, {
+      method: 'POST',
+    }),
+
+  declineInvitation: (invitationId) =>
+    apiRequest(`/stockvel/invitations/${invitationId}/decline`, {
+      method: 'POST',
+    }),
 };
 
 // ===== PAYMENT SERVICE =====
@@ -173,6 +198,24 @@ export const paymentAPI = {
 
   getContributionHistory: (groupId, memberId) =>
     apiRequest(`/payment/contributions/${groupId}/member/${memberId}`),
+
+  // Treasurer contribution management
+  confirmContribution: (contributionId) =>
+    apiRequest(`/payment/contributions/${contributionId}/confirm`, {
+      method: 'POST',
+    }),
+
+  rejectContribution: (contributionId, reason) =>
+    apiRequest(`/payment/contributions/${contributionId}/reject`, {
+      method: 'POST',
+      body: { reason },
+    }),
+
+  flagContribution: (contributionId, reason) =>
+    apiRequest(`/payment/contributions/${contributionId}/flag`, {
+      method: 'POST',
+      body: { reason },
+    }),
 
   // Payouts
   requestPayout: (groupId, amount, bankDetails) =>
@@ -198,6 +241,21 @@ export const paymentAPI = {
 
   // Statistics
   getPaymentStats: (groupId) => apiRequest(`/payment/stats/${groupId}`),
+
+  // Payment Confirmation (Treasurer only)
+  confirmContribution: (contributionId) =>
+    apiRequest(`/payment/contributions/${contributionId}/confirm`, {
+      method: 'POST',
+    }),
+
+  flagContribution: (contributionId, reason) =>
+    apiRequest(`/payment/contributions/${contributionId}/flag`, {
+      method: 'POST',
+      body: { reason },
+    }),
+
+  getMissedContributions: (groupId) =>
+    apiRequest(`/payment/missed-contributions/${groupId}`),
 };
 
 // ===== MEETING SERVICE =====

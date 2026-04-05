@@ -40,8 +40,8 @@ app.get('/sa-prime-rate', async (req, res) => {
 
 app.post('/groups', verifyToken, async (req, res) => {
     try {
-        if (!['Admin', 'Treasurer'].includes(req.user.role)) {
-            return res.status(403).json({ error: 'Only Admins and Treasurers can create groups' });
+        if (req.user.role !== 'Admin') {
+            return res.status(403).json({ error: 'Only Admins can create groups' });
         }
 
         const {
@@ -176,8 +176,8 @@ app.put('/groups/:groupId', verifyToken, async (req, res) => {
         }
 
         const groupData = groupDoc.data();
-        if (groupData.createdBy !== req.user.uid && req.user.role !== 'Admin') {
-            return res.status(403).json({ error: 'Only group creator or Admin can update' });
+        if (req.user.role !== 'Admin') {
+            return res.status(403).json({ error: 'Only Admins can update groups' });
         }
 
         const updateData = req.body;
@@ -393,6 +393,288 @@ app.post('/groups/:groupId/leave', verifyToken, async (req, res) => {
     } catch (error) {
         console.error('Error leaving group:', error);
         res.status(500).json({ error: error.message || 'Failed to leave group' });
+    }
+});
+
+// ========== MEMBER REMOVAL ENDPOINT ==========
+
+app.delete('/groups/:groupId/members/:memberId', verifyToken, async (req, res) => {
+    try {
+        const { groupId, memberId } = req.params;
+        const db = admin.firestore();
+
+        // Only Admins can remove members
+        if (req.user.role !== 'Admin') {
+            return res.status(403).json({ error: 'Only Admins can remove members' });
+        }
+
+        // Get group
+        const groupDoc = await db.collection('groups').doc(groupId).get();
+        if (!groupDoc.exists) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        const groupData = groupDoc.data();
+
+        // Admins cannot remove themselves
+        if (req.user.uid === memberId) {
+            return res.status(400).json({ error: 'Admins cannot remove themselves from a group' });
+        }
+
+        const members = groupData.members || [];
+
+        // Check if member exists
+        if (!members.includes(memberId)) {
+            return res.status(400).json({ error: 'User is not a member of this group' });
+        }
+
+        // Prevent removing the last member
+        if (members.length === 1) {
+            return res.status(400).json({ error: 'Cannot remove the last member' });
+        }
+
+        // Remove member from group
+        const updatedMembers = members.filter(id => id !== memberId);
+        await db.collection('groups').doc(groupId).update({
+            members: updatedMembers,
+            memberCount: updatedMembers.length,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Remove group from user's groupIds
+        const userRef = db.collection('users').doc(memberId);
+        const userDoc = await userRef.get();
+
+        if (userDoc.exists) {
+            const groupIds = (userDoc.data().groupIds || []).filter(id => id !== groupId);
+            await userRef.update({
+                groupIds,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        res.status(200).json({
+            message: 'Member removed from group',
+            groupId: groupId,
+            memberId: memberId
+        });
+    } catch (error) {
+        console.error('Error removing member:', error);
+        res.status(500).json({ error: error.message || 'Failed to remove member' });
+    }
+});
+
+// ========== MEMBER INVITATION ENDPOINTS ==========
+
+app.post('/groups/:groupId/invite', verifyToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const { memberEmail } = req.body;
+        const userId = req.user.uid;
+        const db = admin.firestore();
+
+        if (!memberEmail) {
+            return res.status(400).json({ error: 'memberEmail is required' });
+        }
+
+        // Only group creator (Admin) can invite
+        const groupDoc = await db.collection('groups').doc(groupId).get();
+        if (!groupDoc.exists) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        const groupData = groupDoc.data();
+        if (groupData.createdBy !== userId) {
+            return res.status(403).json({ error: 'Only group creator can invite members' });
+        }
+
+        // Find user by email
+        const userSnapshot = await db.collection('users')
+            .where('email', '==', memberEmail)
+            .limit(1)
+            .get();
+
+        if (userSnapshot.empty) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const invitedUserId = userSnapshot.docs[0].id;
+        const invitedUserData = userSnapshot.docs[0].data();
+
+        // Check if already a member
+        if (groupData.members && groupData.members.includes(invitedUserId)) {
+            return res.status(400).json({ error: 'User is already a member' });
+        }
+
+        // Create or update invitation
+        const invitationRef = db.collection('invitations').doc();
+        await invitationRef.set({
+            groupId,
+            groupName: groupData.groupName,
+            invitedUserId,
+            invitedEmail: memberEmail,
+            invitedBy: userId,
+            invitedByEmail: req.user.email,
+            status: 'pending',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)) // 30 days
+        });
+
+        res.status(201).json({
+            message: 'Invitation sent successfully',
+            invitationId: invitationRef.id
+        });
+    } catch (error) {
+        console.error('Error inviting member:', error);
+        res.status(500).json({ error: error.message || 'Failed to invite member' });
+    }
+});
+
+app.get('/user/:userId/invitations', verifyToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const db = admin.firestore();
+
+        // Only user can view their own invitations
+        if (userId !== req.user.uid) {
+            return res.status(403).json({ error: 'Cannot view other users\' invitations' });
+        }
+
+        const invitationSnapshot = await db.collection('invitations')
+            .where('invitedUserId', '==', userId)
+            .where('status', '==', 'pending')
+            .get();
+
+        const invitations = invitationSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            expiresAt: doc.data().expiresAt?.toDate?.() || doc.data().expiresAt,
+            createdAt: doc.data().createdAt?.toDate?.() || doc.data().createdAt
+        }));
+
+        res.json({ invitations, total: invitations.length });
+    } catch (error) {
+        console.error('Error fetching invitations:', error);
+        res.status(500).json({ error: error.message || 'Failed to fetch invitations' });
+    }
+});
+
+app.post('/invitations/:invitationId/accept', verifyToken, async (req, res) => {
+    try {
+        const { invitationId } = req.params;
+        const userId = req.user.uid;
+        const db = admin.firestore();
+
+        const invitationDoc = await db.collection('invitations').doc(invitationId).get();
+        if (!invitationDoc.exists) {
+            return res.status(404).json({ error: 'Invitation not found' });
+        }
+
+        const invitation = invitationDoc.data();
+
+        // Verify invitation is for this user
+        if (invitation.invitedUserId !== userId) {
+            return res.status(403).json({ error: 'This invitation is not for you' });
+        }
+
+        if (invitation.status !== 'pending') {
+            return res.status(400).json({ error: 'Invitation has already been processed' });
+        }
+
+        // Check if invitation expired
+        const now = admin.firestore.Timestamp.now();
+        if (invitation.expiresAt && invitation.expiresAt < now) {
+            return res.status(400).json({ error: 'Invitation has expired' });
+        }
+
+        const groupId = invitation.groupId;
+        const groupDoc = await db.collection('groups').doc(groupId).get();
+
+        if (!groupDoc.exists) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        const groupData = groupDoc.data();
+        const members = groupData.members || [];
+
+        // Check if already a member
+        if (members.includes(userId)) {
+            return res.status(400).json({ error: 'Already a member of this group' });
+        }
+
+        // Add user to group
+        members.push(userId);
+        await db.collection('groups').doc(groupId).update({
+            members,
+            memberCount: members.length,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Add group to user's groupIds
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+
+        if (userDoc.exists) {
+            const groupIds = userDoc.data().groupIds || [];
+            if (!groupIds.includes(groupId)) {
+                groupIds.push(groupId);
+                await userRef.update({
+                    groupIds,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+
+        // Update invitation status
+        await db.collection('invitations').doc(invitationId).update({
+            status: 'accepted',
+            acceptedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({
+            message: 'Invitation accepted successfully',
+            groupId: groupId
+        });
+    } catch (error) {
+        console.error('Error accepting invitation:', error);
+        res.status(500).json({ error: error.message || 'Failed to accept invitation' });
+    }
+});
+
+app.post('/invitations/:invitationId/decline', verifyToken, async (req, res) => {
+    try {
+        const { invitationId } = req.params;
+        const userId = req.user.uid;
+        const db = admin.firestore();
+
+        const invitationDoc = await db.collection('invitations').doc(invitationId).get();
+        if (!invitationDoc.exists) {
+            return res.status(404).json({ error: 'Invitation not found' });
+        }
+
+        const invitation = invitationDoc.data();
+
+        // Verify invitation is for this user
+        if (invitation.invitedUserId !== userId) {
+            return res.status(403).json({ error: 'This invitation is not for you' });
+        }
+
+        if (invitation.status !== 'pending') {
+            return res.status(400).json({ error: 'Invitation has already been processed' });
+        }
+
+        // Update invitation status
+        await db.collection('invitations').doc(invitationId).update({
+            status: 'declined',
+            declinedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        res.json({
+            message: 'Invitation declined'
+        });
+    } catch (error) {
+        console.error('Error declining invitation:', error);
+        res.status(500).json({ error: error.message || 'Failed to decline invitation' });
     }
 });
 
