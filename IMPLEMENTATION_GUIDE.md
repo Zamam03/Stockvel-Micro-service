@@ -118,12 +118,12 @@ The service includes:
 1. **SARB (South African Reserve Bank)**
    - Official URL: https://www.sarb.co.za/
    - Direct API: Not publicly available, but rates are published weekly
-   - Reliability: ⭐⭐⭐⭐⭐ (Official source)
+   - Reliability: (Official source)
 
 2. **Alternative: Quandl API**
    - Dataset: "South African Central Bank Rates"
    - Requires API key (free tier available)
-   - Reliability: ⭐⭐⭐⭐
+   - Reliability: 
 
 3. **Banking APIs with Rate Data**
    - Investec API

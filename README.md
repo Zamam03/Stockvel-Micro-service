@@ -1,42 +1,42 @@
-# 🤝 Stokvel Management Platform
+#  Stokvel Management Platform
 
 A comprehensive microservices-based platform for managing South African rotating savings groups (Stokvels) with complete member management, contribution tracking, meeting management, payments, and analytics.
 
-## ✨ Features
+##  Features
 
-### 🏢 Complete Group Management
+###  Complete Group Management
 - Create and configure stokvel groups
 - Multi-member support with configurable limits
 - Group status tracking (active, paused, completed)
 - Flexible member onboarding (invitations + join requests)
 
-### 👥 Member Management
+###  Member Management
 - Three user roles: Member, Treasurer, Admin
 - Multi-group membership support
 - Role-based access control
 - Member invitation and approval workflows
 
-### 💰 Payment & Contribution Tracking
+###  Payment & Contribution Tracking
 - Online contribution processing (Stripe)
 - Real-time contribution history
 - Treasurer payment confirmation
 - Payout management and disbursements
 
-### 📅 Meeting Management
+###  Meeting Management
 - Schedule and manage group meetings
 - Agenda posting and tracking
 - Meeting minutes recording
 - Member notifications
 - Attendance tracking
 
-### 📊 Advanced Analytics & Reporting
+###  Advanced Analytics & Reporting
 - **Report 1**: Contribution compliance per member
 - **Report 2**: Payout history and projections
 - **Report 3**: Custom analytics view
 - CSV & PDF export capabilities
 - Savings growth projections using SA Prime Rate
 
-### 📈 South African Data Integration
+###  South African Data Integration
 - Real-time SA Prime Lending Rate
 - Repo Rate tracking
 - Savings growth calculations
@@ -44,7 +44,7 @@ A comprehensive microservices-based platform for managing South African rotating
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 ### Microservices
 - **Auth Service** (Port 4001) - Authentication and user management
@@ -66,7 +66,7 @@ A comprehensive microservices-based platform for managing South African rotating
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Node.js 20+
@@ -122,7 +122,7 @@ npm run dev  # from each directory
 
 ---
 
-## 📚 Documentation
+##  Documentation
 
 | Document | Purpose |
 |----------|---------|
@@ -134,7 +134,7 @@ npm run dev  # from each directory
 
 ---
 
-## 🔑 Key API Endpoints
+##  Key API Endpoints
 
 ### Authentication
 ```
@@ -182,7 +182,7 @@ See [API_TESTING.md](./API_TESTING.md) for complete endpoint list and examples.
 
 ---
 
-## 🎯 Use Cases
+##  Use Cases
 
 ### Treasurer
 - Schedule meetings
@@ -207,7 +207,7 @@ See [API_TESTING.md](./API_TESTING.md) for complete endpoint list and examples.
 
 ---
 
-## 📊 Database Schema
+##  Database Schema
 
 The platform uses Firestore with the following main collections:
 - `users` - User profiles and memberships
@@ -220,19 +220,19 @@ The platform uses Firestore with the following main collections:
 
 ---
 
-## 🔐 Security
+##  Security
 
-- ✅ Firebase Authentication with secure tokens
-- ✅ Role-based access control on all endpoints
-- ✅ Token verification middleware
-- ✅ User data isolation
-- ✅ Stripe PCI compliance
-- ✅ Environment variables for sensitive data
-- ✅ CORS protection
+-  Firebase Authentication with secure tokens
+-  Role-based access control on all endpoints
+-  Token verification middleware
+-  User data isolation
+-  Stripe PCI compliance
+-  Environment variables for sensitive data
+-  CORS protection
 
 ---
 
-## 🧪 Testing
+##  Testing
 
 ### Run Tests
 ```bash
@@ -251,7 +251,7 @@ See [API_TESTING.md](./API_TESTING.md) for complete testing guide with cURL exam
 
 ---
 
-## 📈 Performance & Scalability
+##  Performance & Scalability
 
 - **Microservices**: Each service can scale independently
 - **Firestore**: Auto-scaling database
@@ -261,7 +261,7 @@ See [API_TESTING.md](./API_TESTING.md) for complete testing guide with cURL exam
 
 ---
 
-## 🛠️ Troubleshooting
+##  Troubleshooting
 
 ### Firebase Connection Issues
 - Verify `firebaseServiceAccountKey.json` exists
@@ -280,7 +280,7 @@ See [API_TESTING.md](./API_TESTING.md) for complete testing guide with cURL exam
 
 ---
 
-## 📝 Project Structure
+##  Project Structure
 
 ```
 Stockvel-Micro-service/
@@ -299,9 +299,9 @@ Stockvel-Micro-service/
 
 ---
 
-## 🚦 Status
+##  Status
 
-✅ **PRODUCTION READY**
+ **PRODUCTION READY**
 
 - All 10+ core requirements implemented
 - 47+ API endpoints
@@ -312,7 +312,7 @@ Stockvel-Micro-service/
 
 ---
 
-## 📖 Getting Help
+##  Getting Help
 
 1. Check the relevant documentation file
 2. Review inline code comments
@@ -321,13 +321,13 @@ Stockvel-Micro-service/
 
 ---
 
-## 📄 License
+##  License
 
 MIT License - See LICENSE file for details
 
 ---
 
-## 🎉 Contributing
+##  Contributing
 
 This project follows standard Git practices:
 1. Create a feature branch
@@ -337,7 +337,7 @@ This project follows standard Git practices:
 
 ---
 
-## 📞 Support
+##  Support
 
 For issues or questions:
 - Review the comprehensive documentation
@@ -349,13 +349,13 @@ For issues or questions:
 
 **Platform Version**: 1.0.0  
 **Last Updated**: April 2026  
-**Status**: ✅ Ready for Production
+**Status**:  Ready for Production
 
 ---
 
-## 🌟 Key Highlights
+##  Key Highlights
 
-✨ **What Makes This Platform Unique:**
+ **What Makes This Platform Unique:**
 
 1. **True Multi-Group Membership** - Members can belong to unlimited groups
 2. **Flexible Onboarding** - Supports both invitations and join requests
@@ -366,4 +366,4 @@ For issues or questions:
 7. **Well-Documented** - Comprehensive guides and API examples
 8. **Modern Stack** - Node.js, React, Firebase, Stripe
 
-🚀 **Ready to deploy. Ready to scale. Ready for production.**
+ **Ready to deploy. Ready to scale. Ready for production.**
