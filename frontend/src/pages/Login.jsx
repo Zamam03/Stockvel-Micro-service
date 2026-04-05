@@ -1,6 +1,5 @@
-// src/pages/Login.jsx
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import '../styles/Auth.css';
 
@@ -9,8 +8,8 @@ export default function Login() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const { login } = useAuth();
     const navigate = useNavigate();
+    const { login } = useAuth();
 
     async function handleLogin(e) {
         e.preventDefault();
@@ -21,7 +20,7 @@ export default function Login() {
             await login(email, password);
             navigate('/dashboard');
         } catch (err) {
-            setError(err.message);
+            setError(err.message || 'Login failed. Please check your credentials.');
         } finally {
             setLoading(false);
         }
@@ -30,36 +29,60 @@ export default function Login() {
     return (
         <div className="auth-container">
             <div className="auth-card">
-                <h2>Login to Stokvel Pro</h2>
-                {error && <div className="error-message">{error}</div>}
+                <div className="auth-header">
+                    <h1>Stockvel Pro</h1>
+                    <p>Community Financial Management</p>
+                </div>
+                
+                <h2>Login to Your Account</h2>
+                
+                {error && (
+                    <div className="error-message">
+                        <strong>Error:</strong> {error}
+                    </div>
+                )}
+                
                 <form onSubmit={handleLogin}>
                     <div className="form-group">
-                        <label>Email</label>
+                        <label htmlFor="email">Email Address</label>
                         <input
+                            id="email"
                             type="email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
+                            placeholder="you@example.com"
                             required
                             disabled={loading}
                         />
                     </div>
+                    
                     <div className="form-group">
-                        <label>Password</label>
+                        <label htmlFor="password">Password</label>
                         <input
+                            id="password"
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter your password"
                             required
                             disabled={loading}
                         />
                     </div>
-                    <button type="submit" disabled={loading}>
+                    
+                    <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="btn-primary"
+                    >
                         {loading ? 'Logging in...' : 'Login'}
                     </button>
                 </form>
-                <p className="auth-link">
-                    Don't have an account? <a href="/register">Register here</a>
-                </p>
+                
+                <div className="auth-footer">
+                    <p>
+                        Don't have an account? <Link to="/register">Create one here</Link>
+                    </p>
+                </div>
             </div>
         </div>
     );

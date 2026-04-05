@@ -82,8 +82,41 @@ app.post('/register', async (req, res) => {
             isActive: true
         });
 
-        res.status(201).json({ 
-            message: 'User registered successfully', 
+        // Get auth token using Firebase REST API
+        const apiKey = process.env.VITE_FIREBASE_API_KEY;
+        const signInResponse = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email,
+                password,
+                returnSecureToken: true
+            })
+        });
+
+        const signInData = await signInResponse.json();
+
+        if (!signInResponse.ok) {
+            console.error('Failed to get token after registration:', signInData.error?.message);
+            // Still return user data even if token generation fails
+            return res.status(201).json({
+                message: 'User registered successfully',
+                user: {
+                    uid: userRecord.uid,
+                    email: userRecord.email,
+                    displayName: userRecord.displayName,
+                    role
+                }
+            });
+        }
+
+        res.status(201).json({
+            message: 'User registered successfully',
+            idToken: signInData.idToken,
+            refreshToken: signInData.refreshToken,
+            expiresIn: signInData.expiresIn,
+            localId: signInData.localId,
+            email: signInData.email,
             user: {
                 uid: userRecord.uid,
                 email: userRecord.email,

@@ -1,159 +1,287 @@
-// src/services/api.js
+/**
+ * API Service Layer - Handles all microservice communications
+ * Gateway: http://localhost:5000/api
+ */
+
 const API_BASE_URL = 'http://localhost:5000/api';
 
-export async function getAuthToken() {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    return user.token || null;
-}
-
-async function apiCall(endpoint, options = {}) {
-    const token = await getAuthToken();
-    const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers,
-    };
-
-    if (token) {
-        headers.Authorization = `Bearer ${token}`;
+// Helper function to get token from localStorage
+export const getAuthToken = () => {
+  const user = localStorage.getItem('user');
+  if (user) {
+    try {
+      return JSON.parse(user).token;
+    } catch (e) {
+      return null;
     }
+  }
+  return null;
+};
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers,
-    });
+// Helper function for API requests
+const apiRequest = async (endpoint, options = {}) => {
+  const token = getAuthToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
 
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'API call failed');
-    }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+    console.log(`[API] Request to ${endpoint} with token: ${token.substring(0, 20)}...`);
+  } else {
+    console.log(`[API] Request to ${endpoint} WITHOUT token`);
+  }
 
-    return response.json();
-}
+  const config = {
+    method: options.method || 'GET',
+    headers,
+  };
 
-// Auth endpoints
+  if (options.body) {
+    config.body = JSON.stringify(options.body);
+  }
+
+  const url = `${API_BASE_URL}${endpoint}`;
+
+  const response = await fetch(url, config);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: response.statusText }));
+    console.error(`[API] Error on ${endpoint}:`, error);
+    throw new Error(error.message || error.error || `API Error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data;
+};
+
+// ===== AUTH SERVICE =====
 export const authAPI = {
-    register: (email, password, displayName, role) =>
-        apiCall('/auth/register', {
-            method: 'POST',
-            body: JSON.stringify({ email, password, displayName, role }),
-        }),
-    verifyToken: () =>
-        apiCall('/auth/verify-token', { method: 'POST' }),
-    getUser: (uid) =>
-        apiCall(`/auth/user/${uid}`),
+  register: (email, password, displayName, role = 'member') =>
+    apiRequest('/auth/register', {
+      method: 'POST',
+      body: { email, password, displayName, role },
+    }),
+
+  login: (email, password) =>
+    apiRequest('/auth/login', {
+      method: 'POST',
+      body: { email, password },
+    }),
+
+  verifyToken: () => apiRequest('/auth/verify-token'),
+
+  getUserProfile: (userId) => apiRequest(`/auth/user/${userId}`),
+
+  updateUserProfile: (userId, updates) =>
+    apiRequest(`/auth/user/${userId}`, {
+      method: 'PUT',
+      body: updates,
+    }),
 };
 
-// Group endpoints
+// ===== STOCKVEL SERVICE (Groups & Members) =====
 export const groupAPI = {
-    createGroup: (groupData) =>
-        apiCall('/stockvel/groups', {
-            method: 'POST',
-            body: JSON.stringify(groupData),
-        }),
-    getGroups: (status = 'active') =>
-        apiCall(`/stockvel/groups?status=${status}`),
-    getGroupDetails: (groupId) =>
-        apiCall(`/stockvel/groups/${groupId}`),
-    updateGroup: (groupId, updates) =>
-        apiCall(`/stockvel/groups/${groupId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates),
-        }),
-    getUserGroups: (userId) =>
-        apiCall(`/stockvel/user/${userId}/groups`),
-    getGroupMembers: (groupId) =>
-        apiCall(`/stockvel/groups/${groupId}/members`),
-    inviteToGroup: (groupId, memberId, email) =>
-        apiCall(`/stockvel/groups/${groupId}/invite`, {
-            method: 'POST',
-            body: JSON.stringify({ memberId, email }),
-        }),
-    requestToJoinGroup: (groupId) =>
-        apiCall(`/stockvel/groups/${groupId}/join-request`, {
-            method: 'POST',
-        }),
-    getJoinRequests: (groupId) =>
-        apiCall(`/stockvel/groups/${groupId}/join-requests`),
-    approveJoinRequest: (requestId) =>
-        apiCall(`/stockvel/join-requests/${requestId}/approve`, {
-            method: 'POST',
-        }),
-    rejectJoinRequest: (requestId) =>
-        apiCall(`/stockvel/join-requests/${requestId}/reject`, {
-            method: 'POST',
-        }),
-    removeGroupMember: (groupId, memberId) =>
-        apiCall(`/stockvel/groups/${groupId}/remove-member`, {
-            method: 'POST',
-            body: JSON.stringify({ memberId }),
-        }),
+  // Group Operations
+  createGroup: (groupData) =>
+    apiRequest('/stockvel/groups', {
+      method: 'POST',
+      body: groupData,
+    }),
+
+  getGroups: () => apiRequest('/stockvel/groups'),
+
+  getGroupDetails: (groupId) => apiRequest(`/stockvel/groups/${groupId}`),
+
+  updateGroup: (groupId, updates) =>
+    apiRequest(`/stockvel/groups/${groupId}`, {
+      method: 'PUT',
+      body: updates,
+    }),
+
+  deleteGroup: (groupId) =>
+    apiRequest(`/stockvel/groups/${groupId}`, {
+      method: 'DELETE',
+    }),
+
+  getUserGroups: (userId) => apiRequest(`/stockvel/user/${userId}/groups`),
+
+  // Member Operations
+  getGroupMembers: (groupId) => apiRequest(`/stockvel/groups/${groupId}/members`),
+
+  addMember: (groupId, memberId, role = 'member') =>
+    apiRequest(`/stockvel/groups/${groupId}/members`, {
+      method: 'POST',
+      body: { memberId, role },
+    }),
+
+  removeMember: (groupId, memberId) =>
+    apiRequest(`/stockvel/groups/${groupId}/members/${memberId}`, {
+      method: 'DELETE',
+    }),
+
+  updateMemberRole: (groupId, memberId, role) =>
+    apiRequest(`/stockvel/groups/${groupId}/members/${memberId}`, {
+      method: 'PUT',
+      body: { role },
+    }),
+
+  joinGroup: (groupId) =>
+    apiRequest(`/stockvel/groups/${groupId}/join`, {
+      method: 'POST',
+    }),
+
+  leaveGroup: (groupId) =>
+    apiRequest(`/stockvel/groups/${groupId}/leave`, {
+      method: 'POST',
+    }),
+
+  // Member Requests
+  sendJoinRequest: (groupId) =>
+    apiRequest(`/stockvel/groups/${groupId}/join-request`, {
+      method: 'POST',
+    }),
+
+  getJoinRequests: (groupId) => apiRequest(`/stockvel/groups/${groupId}/join-requests`),
+
+  approveJoinRequest: (groupId, userId) =>
+    apiRequest(`/stockvel/groups/${groupId}/join-requests/${userId}/approve`, {
+      method: 'POST',
+    }),
+
+  rejectJoinRequest: (groupId, userId) =>
+    apiRequest(`/stockvel/groups/${groupId}/join-requests/${userId}/reject`, {
+      method: 'POST',
+    }),
 };
 
-// Payment endpoints
+// ===== PAYMENT SERVICE =====
 export const paymentAPI = {
-    contribute: (groupId, amount, paymentMethodId) =>
-        apiCall('/payment/contribute', {
-            method: 'POST',
-            body: JSON.stringify({ groupId, amount, paymentMethodId }),
-        }),
-    getContributions: (groupId) =>
-        apiCall(`/payment/contributions/${groupId}`),
-    getUserContributions: (userId, groupId) =>
-        apiCall(`/payment/user-contributions/${userId}/${groupId}`),
-    getPayouts: (groupId) =>
-        apiCall(`/payment/payouts/${groupId}`),
-    initiatePayouts: (groupId, memberId, amount, bankDetails) =>
-        apiCall('/payment/payout/initiate', {
-            method: 'POST',
-            body: JSON.stringify({ groupId, memberId, amount, bankDetails }),
-        }),
-    processPayout: (payoutId) =>
-        apiCall(`/payment/payout/${payoutId}/process`, {
-            method: 'POST',
-        }),
+  // Contributions
+  contribute: (groupId, amount, paymentMethod = 'bank_transfer') =>
+    apiRequest('/payment/contribute', {
+      method: 'POST',
+      body: { groupId, amount, paymentMethod },
+    }),
+
+  getContributions: (groupId) =>
+    apiRequest(`/payment/contributions/${groupId}`),
+
+  getUserContributions: (userId) =>
+    apiRequest(`/payment/contributions/user/${userId}`),
+
+  getContributionHistory: (groupId, memberId) =>
+    apiRequest(`/payment/contributions/${groupId}/member/${memberId}`),
+
+  // Payouts
+  requestPayout: (groupId, amount, bankDetails) =>
+    apiRequest('/payment/payout/request', {
+      method: 'POST',
+      body: { groupId, amount, bankDetails },
+    }),
+
+  getPayoutHistory: (groupId) => apiRequest(`/payment/payout-history/${groupId}`),
+
+  getUserPayoutHistory: (userId) => apiRequest(`/payment/payout-history/user/${userId}`),
+
+  approvePayout: (payoutId) =>
+    apiRequest(`/payment/payout/${payoutId}/approve`, {
+      method: 'POST',
+    }),
+
+  rejectPayout: (payoutId, reason) =>
+    apiRequest(`/payment/payout/${payoutId}/reject`, {
+      method: 'POST',
+      body: { reason },
+    }),
+
+  // Statistics
+  getPaymentStats: (groupId) => apiRequest(`/payment/stats/${groupId}`),
 };
 
-// Meeting endpoints
+// ===== MEETING SERVICE =====
 export const meetingAPI = {
-    scheduleMeeting: (groupId, meetingData) =>
-        apiCall('/meetings/meetings', {
-            method: 'POST',
-            body: JSON.stringify({ groupId, ...meetingData }),
-        }),
-    getGroupMeetings: (groupId) =>
-        apiCall(`/meetings/meetings/${groupId}`),
-    getUpcomingMeetings: (groupId) =>
-        apiCall(`/meetings/meetings/${groupId}/upcoming`),
-    getMeetingDetails: (meetingId) =>
-        apiCall(`/meetings/meetings/${meetingId}`),
-    updateAgenda: (meetingId, agenda) =>
-        apiCall(`/meetings/meetings/${meetingId}/agenda`, {
-            method: 'PUT',
-            body: JSON.stringify({ agenda }),
-        }),
-    markAttendance: (meetingId) =>
-        apiCall(`/meetings/meetings/${meetingId}/mark-attended`, {
-            method: 'POST',
-        }),
-    recordMinutes: (meetingId, minutes) =>
-        apiCall(`/meetings/meetings/${meetingId}/minutes`, {
-            method: 'PUT',
-            body: JSON.stringify({ minutes }),
-        }),
-    getNotifications: (userId) =>
-        apiCall(`/meetings/notifications/${userId}`),
+  // Meetings
+  scheduleMeeting: (groupId, meetingData) =>
+    apiRequest('/meeting/meetings', {
+      method: 'POST',
+      body: { ...meetingData, groupId },
+    }),
+
+  getGroupMeetings: (groupId) => apiRequest(`/meeting/meetings/group/${groupId}`),
+
+  getMeetingDetails: (meetingId) => apiRequest(`/meeting/meetings/${meetingId}`),
+
+  updateMeeting: (meetingId, updates) =>
+    apiRequest(`/meeting/meetings/${meetingId}`, {
+      method: 'PUT',
+      body: updates,
+    }),
+
+  deleteMeeting: (meetingId) =>
+    apiRequest(`/meeting/meetings/${meetingId}`, {
+      method: 'DELETE',
+    }),
+
+  getUpcomingMeetings: (groupId) =>
+    apiRequest(`/meeting/meetings/upcoming/${groupId}`),
+
+  // Agenda
+  updateAgenda: (meetingId, agenda) =>
+    apiRequest(`/meeting/agenda/${meetingId}`, {
+      method: 'PUT',
+      body: { agenda },
+    }),
+
+  // Minutes
+  recordMinutes: (meetingId, minutes) =>
+    apiRequest(`/meeting/minutes/${meetingId}`, {
+      method: 'PUT',
+      body: { minutes },
+    }),
+
+  // Attendance
+  markAttendance: (meetingId) =>
+    apiRequest(`/meeting/meetings/${meetingId}/mark-attended`, {
+      method: 'POST',
+    }),
 };
 
-// Analytics endpoints
+// ===== ANALYTICS SERVICE =====
 export const analyticsAPI = {
-    getComplianceReport: (groupId) =>
-        apiCall(`/analytics/dashboard/${groupId}/contribution-compliance`),
-    getPayoutReport: (groupId) =>
-        apiCall(`/analytics/dashboard/${groupId}/payout-history`),
-    getCustomReport: (groupId) =>
-        apiCall(`/analytics/dashboard/${groupId}/custom`),
-    exportComplianceCSV: (groupId) =>
-        apiCall(`/analytics/export/compliance/${groupId}/csv`),
-    exportPayoutCSV: (groupId) =>
-        apiCall(`/analytics/export/payout/${groupId}/csv`),
+  // Compliance Report
+  getComplianceReport: (groupId) =>
+    apiRequest(`/analytics/dashboard/${groupId}/compliance`),
+
+  // Payout Projections
+  getPayoutReport: (groupId) =>
+    apiRequest(`/analytics/dashboard/${groupId}/payout-history`),
+
+  // Custom Metrics
+  getCustomReport: (groupId) =>
+    apiRequest(`/analytics/dashboard/${groupId}/custom`),
+
+  // Export Reports
+  exportComplianceCSV: (groupId) => {
+    const token = getAuthToken();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    
+    return fetch(`${API_BASE_URL}/analytics/export/${groupId}?format=csv`, {
+      headers,
+    })
+      .then((res) => res.blob())
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `compliance_${groupId}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+  },
+
+  exportPayoutPDF: (groupId) =>
+    downloadFile(`/analytics/export/payout/${groupId}/pdf`, `payouts_${groupId}.pdf`),
 };

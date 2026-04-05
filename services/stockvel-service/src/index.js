@@ -227,6 +227,175 @@ app.get('/groups/:groupId/members', async (req, res) => {
     }
 });
 
+// ========== USER GROUPS ENDPOINTS ==========
+
+app.get('/user/:userId/groups', verifyToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const db = admin.firestore();
+
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            return res.json({ groups: [] });
+        }
+
+        const groupIds = userDoc.data().groupIds || [];
+        const groups = [];
+
+        for (const groupId of groupIds) {
+            const groupDoc = await db.collection('groups').doc(groupId).get();
+            if (groupDoc.exists) {
+                groups.push({
+                    id: groupId,
+                    ...groupDoc.data(),
+                    startDate: groupDoc.data().startDate?.toDate?.() || groupDoc.data().startDate,
+                    createdAt: groupDoc.data().createdAt?.toDate?.() || groupDoc.data().createdAt
+                });
+            }
+        }
+
+        res.json({ groups, total: groups.length });
+    } catch (error) {
+        console.error('Error fetching user groups:', error);
+        res.status(500).json({ error: error.message || 'Failed to fetch user groups' });
+    }
+});
+
+// ========== GROUP JOIN/LEAVE ENDPOINTS ==========
+
+app.post('/groups/:groupId/join', verifyToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const userId = req.user.uid;
+        const db = admin.firestore();
+
+        console.log(`[JOIN] User ${userId} attempting to join group ${groupId}`);
+
+        // Get group
+        const groupDoc = await db.collection('groups').doc(groupId).get();
+        if (!groupDoc.exists) {
+            console.log(`[JOIN] Group ${groupId} not found`);
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        const groupData = groupDoc.data();
+        const members = groupData.members || [];
+
+        console.log(`[JOIN] Group found with ${members.length} members`);
+
+        // Check if already a member
+        if (members.includes(userId)) {
+            console.log(`[JOIN] User ${userId} is already a member`);
+            return res.status(400).json({ error: 'Already a member of this group' });
+        }
+
+        // Check max members limit
+        if (groupData.maxMembers && members.length >= groupData.maxMembers) {
+            console.log(`[JOIN] Group at max capacity (${groupData.maxMembers})`);
+            return res.status(400).json({ error: 'Group is at maximum capacity' });
+        }
+
+        // Add member to group
+        members.push(userId);
+        await db.collection('groups').doc(groupId).update({
+            members,
+            memberCount: members.length,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        console.log(`[JOIN] Added user ${userId} to group members`);
+
+        // Add group to user's groupIds
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+
+        if (userDoc.exists) {
+            const groupIds = userDoc.data().groupIds || [];
+            if (!groupIds.includes(groupId)) {
+                groupIds.push(groupId);
+                await userRef.update({
+                    groupIds,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+                console.log(`[JOIN] Updated user ${userId} groupIds with ${groupId}`);
+            }
+        } else {
+            await userRef.set({
+                uid: userId,
+                email: req.user.email,
+                groupIds: [groupId],
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            console.log(`[JOIN] Created user doc for ${userId} with group ${groupId}`);
+        }
+
+        console.log(`[JOIN] ‚úÖ User ${userId} successfully joined group ${groupId}`);
+
+        res.status(200).json({
+            message: 'Successfully joined group',
+            groupId: groupId
+        });
+    } catch (error) {
+        console.error(`[JOIN] ‚ùå Error joining group:`, error);
+        res.status(500).json({ error: error.message || 'Failed to join group' });
+    }
+});
+
+app.post('/groups/:groupId/leave', verifyToken, async (req, res) => {
+    try {
+        const { groupId } = req.params;
+        const userId = req.user.uid;
+        const db = admin.firestore();
+
+        // Get group
+        const groupDoc = await db.collection('groups').doc(groupId).get();
+        if (!groupDoc.exists) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        const groupData = groupDoc.data();
+        const members = groupData.members || [];
+
+        // Check if member
+        if (!members.includes(userId)) {
+            return res.status(400).json({ error: 'Not a member of this group' });
+        }
+
+        // Check if last member or creator
+        if (members.length === 1 || groupData.createdBy === userId) {
+            return res.status(400).json({ error: 'Cannot leave: group creator or last member' });
+        }
+
+        // Remove member from group
+        const updatedMembers = members.filter(id => id !== userId);
+        await db.collection('groups').doc(groupId).update({
+            members: updatedMembers,
+            memberCount: updatedMembers.length,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Remove group from user's groupIds
+        const userRef = db.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+
+        if (userDoc.exists) {
+            const groupIds = (userDoc.data().groupIds || []).filter(id => id !== groupId);
+            await userRef.update({
+                groupIds,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        res.status(200).json({
+            message: 'Successfully left group',
+            groupId: groupId
+        });
+    } catch (error) {
+        console.error('Error leaving group:', error);
+        res.status(500).json({ error: error.message || 'Failed to leave group' });
+    }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
@@ -239,7 +408,7 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Ì¥ù Stockvel Service running on port ${PORT}`);
+    console.log(`ÔøΩÔøΩÔøΩ Stockvel Service running on port ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   Health check: http://localhost:${PORT}/health`);
 });
