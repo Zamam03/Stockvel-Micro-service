@@ -28,11 +28,11 @@ const verifyToken = async (req, res, next) => {
             firebase: decodedToken
         };
         
-        console.log('✅ Token verified for user:', decodedToken.email, 'Role:', role);
+        console.log(' Token verified for user:', decodedToken.email, 'Role:', role);
         
         next();
     } catch (error) {
-        console.error('❌ Error verifying token:', error.message);
+        console.error(' Error verifying token:', error.message);
         
         // Specific error messages based on error type
         if (error.code === 'auth/id-token-expired') {
