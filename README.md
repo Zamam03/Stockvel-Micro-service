@@ -1,4 +1,4 @@
-# Note: I built this project solely to learn CI/CD and other DevOps fundamentals, so the application logic itself isn't what matters here
+# NOTE: I built this project solely to learn CI/CD and other DevOps fundamentals, so the application logic itself isn't what matters here
 
 #  Stokvel Management Platform
 
