@@ -119,21 +119,6 @@ cd ../frontend && npm install
 # Run each in separate terminal
 npm run dev  # from each directory
 ```
-
----
-
-##  Documentation
-
-| Document | Purpose |
-|----------|---------|
-| [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md) | Complete setup, API reference, and technical details |
-| [SUMMARY.md](./SUMMARY.md) | Project overview and requirements fulfillment |
-| [API_TESTING.md](./API_TESTING.md) | cURL examples and testing scenarios |
-| [CHECKLIST.md](./CHECKLIST.md) | Requirement verification checklist |
-| [FIREBASE_SETUP.md](./FIREBASE_SETUP.md) | Firebase configuration guide |
-
----
-
 ##  Key API Endpoints
 
 ### Authentication
